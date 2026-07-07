@@ -1,0 +1,241 @@
+#include "linux_input.h"
+
+#if !USE_DESKTOP
+#include <cerrno>
+#include <cstring>
+#include <dirent.h>
+#include <fcntl.h>
+#include <linux/input.h>
+#include <string>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
+
+#ifndef APP_KEY_INPUT_DEVICE
+#define APP_KEY_INPUT_DEVICE ""
+#endif
+
+namespace platform {
+namespace {
+
+#if !USE_DESKTOP
+struct EvdevKeypad {
+    int fd{-1};
+    lv_indev_state_t state{LV_INDEV_STATE_RELEASED};
+    uint32_t key{0};
+};
+
+// Maps the CardputerZero's 46-key matrix to LVGL group-navigation keys.
+// Arrow keys move focus between focusable widgets in the active screen's
+// group; Enter activates (LV_EVENT_CLICKED) the focused widget; Esc is
+// mapped to LV_KEY_ESC for "back"-style navigation (e.g. leaving a
+// disabled menu entry); Home (App Submission Guide: "long Esc or Home
+// exits safely") is mapped to LV_KEY_HOME -- ScreenManager::on_indev_key
+// treats both centrally (see attach_esc_handling). Screen-specific
+// single-letter shortcuts (R for rotate, X for random placement, Backspace
+// for undo -- see PlacementScreen) are plain ASCII and handled directly by
+// that screen's LV_EVENT_KEY callback rather than remapped here.
+uint32_t map_evdev_key(uint16_t code) {
+    switch (code) {
+        case KEY_ESC:
+            return LV_KEY_ESC;
+        case KEY_HOME:
+            return LV_KEY_HOME;
+        case KEY_UP:
+            return LV_KEY_UP;
+        case KEY_DOWN:
+            return LV_KEY_DOWN;
+        case KEY_LEFT:
+            return LV_KEY_LEFT;
+        case KEY_RIGHT:
+            return LV_KEY_RIGHT;
+        case KEY_ENTER:
+        case KEY_KPENTER:
+            return LV_KEY_ENTER;
+        case KEY_BACKSPACE:
+            return LV_KEY_BACKSPACE;
+        case KEY_R:
+            return 'r';
+        case KEY_X:
+            return 'x';
+        // Digits / dot / colon feed the Direct IP text area (Phase 4,
+        // NetDirectIpScreen). LVGL textareas consume plain characters from
+        // keypad indevs directly; every other screen ignores them.
+        case KEY_0:
+            return '0';
+        case KEY_1:
+            return '1';
+        case KEY_2:
+            return '2';
+        case KEY_3:
+            return '3';
+        case KEY_4:
+            return '4';
+        case KEY_5:
+            return '5';
+        case KEY_6:
+            return '6';
+        case KEY_7:
+            return '7';
+        case KEY_8:
+            return '8';
+        case KEY_9:
+            return '9';
+        case KEY_DOT:
+            return '.';
+        case KEY_SEMICOLON:
+            // The Cardputer keyboard produces ':' via the semicolon key
+            // (shift layer is not tracked by this simple mapper); the IP
+            // field only accepts ':' anyway, so map it straight through.
+            return ':';
+        default:
+            return 0;
+    }
+}
+
+bool has_nav_keys(int fd) {
+    unsigned long key_bits[(KEY_MAX / (sizeof(unsigned long) * 8)) + 1] = {};
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) < 0) {
+        return false;
+    }
+
+    auto has_key = [&](int code) {
+        const auto bits_per_word = static_cast<int>(sizeof(unsigned long) * 8);
+        return (key_bits[code / bits_per_word] & (1UL << (code % bits_per_word))) != 0;
+    };
+
+    return has_key(KEY_ESC) || has_key(KEY_UP) || has_key(KEY_DOWN) || has_key(KEY_LEFT) ||
+           has_key(KEY_RIGHT) || has_key(KEY_ENTER);
+}
+
+void evdev_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
+    auto* keypad = static_cast<EvdevKeypad*>(lv_indev_get_driver_data(indev));
+    if (!keypad) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    input_event input{};
+    while (read(keypad->fd, &input, sizeof(input)) == sizeof(input)) {
+        if (input.type != EV_KEY) {
+            continue;
+        }
+
+        const auto key = map_evdev_key(input.code);
+        if (!key || input.value == 2) {
+            continue;
+        }
+
+        keypad->key = key;
+        keypad->state = input.value ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+        data->continue_reading = true;
+        break;
+    }
+
+    data->key = keypad->key;
+    data->state = keypad->state;
+}
+
+void evdev_delete_cb(lv_event_t* event) {
+    auto* indev = static_cast<lv_indev_t*>(lv_event_get_target(event));
+    auto* keypad = static_cast<EvdevKeypad*>(lv_indev_get_driver_data(indev));
+    if (!keypad) {
+        return;
+    }
+
+    if (keypad->fd >= 0) {
+        close(keypad->fd);
+    }
+    delete keypad;
+}
+
+lv_indev_t* create_keypad_from_fd(int fd) {
+    auto* keypad = new EvdevKeypad;
+    keypad->fd = fd;
+
+    auto* indev = lv_indev_create();
+    if (!indev) {
+        delete keypad;
+        close(fd);
+        return nullptr;
+    }
+
+    lv_indev_set_type(indev, LV_INDEV_TYPE_KEYPAD);
+    lv_indev_set_read_cb(indev, evdev_read_cb);
+    lv_indev_set_driver_data(indev, keypad);
+    lv_indev_add_event_cb(indev, evdev_delete_cb, LV_EVENT_DELETE, nullptr);
+    lv_indev_set_group(indev, lv_group_get_default());
+    return indev;
+}
+
+lv_indev_t* try_create_keypad(const char* path) {
+    if (!path || path[0] == '\0') {
+        return nullptr;
+    }
+
+    const int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+        LV_LOG_WARN("failed to open input device %s: %s", path, strerror(errno));
+        return nullptr;
+    }
+
+    if (!has_nav_keys(fd)) {
+        close(fd);
+        return nullptr;
+    }
+
+    LV_LOG_INFO("using evdev key input %s", path);
+    return create_keypad_from_fd(fd);
+}
+
+void discover_keypads(lv_display_t* display, const KeypadIndevCallback& on_indev_created) {
+    const char* configured_device = APP_KEY_INPUT_DEVICE;
+    if (configured_device[0] != '\0') {
+        auto* indev = try_create_keypad(configured_device);
+        if (indev) {
+            lv_indev_set_display(indev, display);
+            if (on_indev_created) {
+                on_indev_created(indev);
+            }
+        }
+        return;
+    }
+
+    auto* dir = opendir("/dev/input");
+    if (!dir) {
+        LV_LOG_WARN("failed to open /dev/input: %s", strerror(errno));
+        return;
+    }
+
+    while (auto* entry = readdir(dir)) {
+        if (std::strncmp(entry->d_name, "event", 5) != 0) {
+            continue;
+        }
+
+        std::string path = "/dev/input/";
+        path += entry->d_name;
+        auto* indev = try_create_keypad(path.c_str());
+        if (indev) {
+            lv_indev_set_display(indev, display);
+            if (on_indev_created) {
+                on_indev_created(indev);
+            }
+        }
+    }
+
+    closedir(dir);
+}
+#endif
+
+} // namespace
+
+void init_key_input(lv_display_t* display, const KeypadIndevCallback& on_indev_created) {
+#if !USE_DESKTOP
+    discover_keypads(display, on_indev_created);
+#else
+    LV_UNUSED(display);
+    LV_UNUSED(on_indev_created);
+#endif
+}
+
+} // namespace platform

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=@APP_DISPLAY_NAME@
+Comment=@APP_PACKAGE_DESCRIPTION@
+Exec=bin/@PROJECT_NAME@-launch
+Icon=share/images/battleship.png
+Terminal=false
+Categories=Game;
+StartupNotify=false
