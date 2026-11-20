@@ -34,7 +34,7 @@ include(GNUInstallDirs)
 
 set(APP_DISPLAY_NAME "Battleship" CACHE STRING "Human-readable application name used by launchers and package filename")
 set(APP_DEBIAN_ARCHITECTURE "arm64" CACHE STRING "Debian package architecture")
-set(APP_MAINTAINER "YutaCar <yutacar@users.noreply.github.com>" CACHE STRING "Debian package maintainer (must match the publishing GitHub account's email -- czdev/prepublish_check.py reject a mismatch as email_mismatch). Using the GitHub-provided noreply address avoids requiring a public profile email.")
+set(APP_MAINTAINER "yutacar <yutacar@users.noreply.github.com>" CACHE STRING "Debian package maintainer (must match the publishing GitHub account's email -- czdev/prepublish_check.py reject a mismatch as email_mismatch). Using the GitHub-provided noreply address avoids requiring a public profile email.")
 set(APP_PACKAGE_DESCRIPTION "CardputerZero Battleship game" CACHE STRING "Debian package summary")
 
 set(APP_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/package")

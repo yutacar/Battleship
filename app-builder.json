@@ -16,7 +16,7 @@
       "background_service": false,
       "external_display": false
     },
-    "author": { "display_name": "YutaCar", "github": "yutacar" },
+    "author": { "display_name": "yutacar", "github": "yutacar" },
     "license": "MIT",
     "source_repo": "https://github.com/yutacar/Battleship",
     "share_code": "BSHP",

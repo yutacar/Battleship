@@ -2205,7 +2205,7 @@ battleship・chainled を含む全 40 アプリを削除**した。このため 
   （CI が強制するのは `pkg_version_arch.deb` との一致のみ）
 
 ### 20.3 対応内容
-- app-builder.json: permissions（network のみ true）、author `YutaCar`/`yutacar`、
+- app-builder.json: permissions（network のみ true）、author `yutacar`、
   license MIT、source_repo、share_code **`BSHP`**（既存 121 アプリと重複なしを確認）、
   store.description を追加。version を `1.0.0-1` に
 - cmake/cm0-package.cmake: `APP_DEBIAN_REVISION`（既定 1）を追加し
