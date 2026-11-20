@@ -108,8 +108,8 @@ void MenuScreen::build_content(lv_obj_t* content) {
 
     auto* menu = lv_obj_create(content);
     lv_obj_remove_style_all(menu);
-    lv_obj_set_size(menu, LV_PCT(100), 96);
-    lv_obj_align(menu, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_size(menu, LV_PCT(100), 92);
+    lv_obj_align(menu, LV_ALIGN_BOTTOM_MID, 0, -17);
     lv_obj_set_flex_flow(menu, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(menu, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(menu, 2, 0);
@@ -139,6 +139,31 @@ void MenuScreen::build_content(lv_obj_t* content) {
             lv_obj_add_state(button, LV_STATE_DISABLED);
         }
     }
+
+    // Double-Esc exit hint. ScreenManager arms title_quit_armed on the first
+    // Esc and clears it after the window (or on leaving the title); the
+    // label swaps text and turns the accent colour while armed.
+    auto* quit_hint = lv_label_create(content);
+    lv_obj_set_style_text_font(quit_hint, i18n::font_for_size(12), 0);
+    lv_obj_set_style_text_opa(quit_hint, LV_OPA_70, 0);
+    reactive::bind_theme(quit_hint, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
+    lv_obj_align(quit_hint, LV_ALIGN_BOTTOM_MID, 0, -1);
+    reactive::bind_bool_text(quit_hint, view_model().title_quit_armed_subject(),
+                             tr(StrId::MenuQuitHint), tr(StrId::MenuQuitArmed));
+    lv_subject_add_observer_obj(
+        view_model().title_quit_armed_subject(),
+        [](lv_observer_t* observer, lv_subject_t* subject) {
+            auto* label = lv_observer_get_target_obj(observer);
+            auto* vm = static_cast<viewmodel::BaseViewModel*>(lv_observer_get_user_data(observer));
+            if (!label || !vm) {
+                return;
+            }
+            const bool armed = lv_subject_get_int(subject) != 0;
+            const auto colors = view::palette(vm->is_dark_mode());
+            lv_obj_set_style_text_opa(label, armed ? LV_OPA_COVER : LV_OPA_70, 0);
+            lv_obj_set_style_text_color(label, armed ? colors.primary : colors.text, 0);
+        },
+        quit_hint, &view_model());
 }
 
 } // namespace screen

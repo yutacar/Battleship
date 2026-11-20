@@ -15,6 +15,8 @@ const Table kChineseTable = [] {
     Table t{};
     t[static_cast<std::size_t>(StrId::AppTitle)] = "Battleship";
     t[static_cast<std::size_t>(StrId::ComingSoon)] = "（即将推出）";
+    t[static_cast<std::size_t>(StrId::MenuQuitHint)] = "Esc x2: 退出";
+    t[static_cast<std::size_t>(StrId::MenuQuitArmed)] = "再按一次 Esc 退出";
     t[static_cast<std::size_t>(StrId::Back)] = "返回";
     t[static_cast<std::size_t>(StrId::Cancel)] = "取消";
     t[static_cast<std::size_t>(StrId::Connect)] = "连接";

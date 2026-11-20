@@ -16,6 +16,8 @@ const Table kEnglishTable = [] {
     Table t{};
     t[static_cast<std::size_t>(StrId::AppTitle)] = "Battleship";
     t[static_cast<std::size_t>(StrId::ComingSoon)] = " (Coming soon)";
+    t[static_cast<std::size_t>(StrId::MenuQuitHint)] = "Esc x2: Quit";
+    t[static_cast<std::size_t>(StrId::MenuQuitArmed)] = "Press Esc again to quit";
     t[static_cast<std::size_t>(StrId::Back)] = "Back";
     t[static_cast<std::size_t>(StrId::Cancel)] = "Cancel";
     t[static_cast<std::size_t>(StrId::Connect)] = "Connect";

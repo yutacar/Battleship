@@ -23,6 +23,7 @@ struct EvdevKeypad {
     int fd{-1};
     lv_indev_state_t state{LV_INDEV_STATE_RELEASED};
     uint32_t key{0};
+    bool shift{false};  ///< Left/Right Shift currently held on this keyboard
 };
 
 // Maps the CardputerZero's 46-key matrix to LVGL group-navigation keys.
@@ -35,61 +36,65 @@ struct EvdevKeypad {
 // single-letter shortcuts (R for rotate, X for random placement, Backspace
 // for undo -- see PlacementScreen) are plain ASCII and handled directly by
 // that screen's LV_EVENT_KEY callback rather than remapped here.
-uint32_t map_evdev_key(uint16_t code) {
+uint32_t map_evdev_key(uint16_t code, bool shift) {
+    // Letters: the CardputerZero's tca8418 driver emits plain KEY_A..KEY_Z on
+    // its base layer (Fn+F/Z/X/C produce KEY_UP/LEFT/DOWN/RIGHT). Without
+    // these, every single-letter screen shortcut was silently dropped on the
+    // real device while still working in the SDL desktop build.
+    static constexpr struct { uint16_t code; char lower; } kLetters[] = {
+        {KEY_A, 'a'}, {KEY_B, 'b'}, {KEY_C, 'c'}, {KEY_D, 'd'}, {KEY_E, 'e'}, {KEY_F, 'f'},
+        {KEY_G, 'g'}, {KEY_H, 'h'}, {KEY_I, 'i'}, {KEY_J, 'j'}, {KEY_K, 'k'}, {KEY_L, 'l'},
+        {KEY_M, 'm'}, {KEY_N, 'n'}, {KEY_O, 'o'}, {KEY_P, 'p'}, {KEY_Q, 'q'}, {KEY_R, 'r'},
+        {KEY_S, 's'}, {KEY_T, 't'}, {KEY_U, 'u'}, {KEY_V, 'v'}, {KEY_W, 'w'}, {KEY_X, 'x'},
+        {KEY_Y, 'y'}, {KEY_Z, 'z'},
+    };
+    for (const auto& letter : kLetters) {
+        if (letter.code == code) {
+            return static_cast<uint32_t>(shift ? letter.lower - 'a' + 'A' : letter.lower);
+        }
+    }
+    // Digits and their US-layout shifted symbols (system xkb layout is "us").
+    static constexpr char kDigits[] = "1234567890";
+    static constexpr char kDigitsShifted[] = "!@#$%^&*()";
+    if (code >= KEY_1 && code <= KEY_0) {
+        const int index = code - KEY_1;
+        return static_cast<uint32_t>(shift ? kDigitsShifted[index] : kDigits[index]);
+    }
+
     switch (code) {
-        case KEY_ESC:
-            return LV_KEY_ESC;
-        case KEY_HOME:
-            return LV_KEY_HOME;
-        case KEY_UP:
-            return LV_KEY_UP;
-        case KEY_DOWN:
-            return LV_KEY_DOWN;
-        case KEY_LEFT:
-            return LV_KEY_LEFT;
-        case KEY_RIGHT:
-            return LV_KEY_RIGHT;
+        case KEY_ESC:         return LV_KEY_ESC;
+        case KEY_HOME:        return LV_KEY_HOME;
+        case KEY_END:         return LV_KEY_END;
+        case KEY_UP:          return LV_KEY_UP;
+        case KEY_DOWN:        return LV_KEY_DOWN;
+        case KEY_LEFT:        return LV_KEY_LEFT;
+        case KEY_RIGHT:       return LV_KEY_RIGHT;
         case KEY_ENTER:
-        case KEY_KPENTER:
-            return LV_KEY_ENTER;
-        case KEY_BACKSPACE:
-            return LV_KEY_BACKSPACE;
-        case KEY_R:
-            return 'r';
-        case KEY_X:
-            return 'x';
-        // Digits / dot / colon feed the Direct IP text area (Phase 4,
-        // NetDirectIpScreen). LVGL textareas consume plain characters from
-        // keypad indevs directly; every other screen ignores them.
-        case KEY_0:
-            return '0';
-        case KEY_1:
-            return '1';
-        case KEY_2:
-            return '2';
-        case KEY_3:
-            return '3';
-        case KEY_4:
-            return '4';
-        case KEY_5:
-            return '5';
-        case KEY_6:
-            return '6';
-        case KEY_7:
-            return '7';
-        case KEY_8:
-            return '8';
-        case KEY_9:
-            return '9';
-        case KEY_DOT:
-            return '.';
-        case KEY_SEMICOLON:
-            // The Cardputer keyboard produces ':' via the semicolon key
-            // (shift layer is not tracked by this simple mapper); the IP
-            // field only accepts ':' anyway, so map it straight through.
-            return ':';
-        default:
-            return 0;
+        case KEY_KPENTER:     return LV_KEY_ENTER;
+        case KEY_BACKSPACE:   return LV_KEY_BACKSPACE;
+        case KEY_DELETE:      return LV_KEY_DEL;
+        case KEY_SPACE:       return ' ';
+        case KEY_MINUS:       return shift ? '_' : '-';
+        case KEY_EQUAL:       return shift ? '+' : '=';
+        case KEY_LEFTBRACE:   return shift ? '{' : '[';
+        case KEY_RIGHTBRACE:  return shift ? '}' : ']';
+        // The Direct IP field only accepts ':' and the CardputerZero keyboard
+        // has no separate colon key, so the semicolon key always yields ':'.
+        case KEY_SEMICOLON:   return ':';
+        case KEY_APOSTROPHE:  return shift ? '"' : '\'';
+        case KEY_GRAVE:       return shift ? '~' : '`';
+        case KEY_BACKSLASH:   return shift ? '|' : '\\';
+        case KEY_COMMA:       return shift ? '<' : ',';
+        case KEY_DOT:         return shift ? '>' : '.';
+        case KEY_SLASH:       return shift ? '?' : '/';
+        // Symbols the keyboard's Sym layer sends as keypad codes.
+        case KEY_KPPLUS:      return '+';
+        case KEY_KPMINUS:     return '-';
+        case KEY_KPASTERISK:  return '*';
+        case KEY_KPSLASH:     return '/';
+        case KEY_KPDOT:       return '.';
+        case KEY_KPEQUAL:     return '=';
+        default:              return 0;
     }
 }
 
@@ -121,7 +126,14 @@ void evdev_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
             continue;
         }
 
-        const auto key = map_evdev_key(input.code);
+        if (input.code == KEY_LEFTSHIFT || input.code == KEY_RIGHTSHIFT) {
+            if (input.value != 2) {
+                keypad->shift = input.value != 0;
+            }
+            continue;
+        }
+
+        const auto key = map_evdev_key(input.code, keypad->shift);
         if (!key || input.value == 2) {
             continue;
         }

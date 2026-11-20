@@ -45,6 +45,8 @@ enum class StrId {
     // ---- App / common ----
     AppTitle,
     ComingSoon,          ///< " (Coming soon)" suffix for disabled menu entries
+    MenuQuitHint,        ///< title-screen hint: double Esc exits to the launcher
+    MenuQuitArmed,       ///< shown for the double-Esc window after the first Esc
     Back,
     Cancel,
     Connect,

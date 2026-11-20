@@ -245,6 +245,20 @@ lv_subject_t* BaseViewModel::interrupt_modal_subject() {
     return interrupt_modal_subject_.native();
 }
 
+lv_subject_t* BaseViewModel::title_quit_armed_subject() {
+    return title_quit_armed_subject_.native();
+}
+
+void BaseViewModel::set_title_quit_armed(bool armed) {
+    if (title_quit_armed_subject_.value() != armed) {
+        title_quit_armed_subject_.set(armed);
+    }
+}
+
+bool BaseViewModel::title_quit_armed() const {
+    return title_quit_armed_subject_.value();
+}
+
 bool BaseViewModel::is_match_interruptible() const {
     const auto page = current_page();
     const bool in_match_page = page == model::AppPage::Placement ||

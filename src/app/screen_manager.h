@@ -86,10 +86,24 @@ private:
     bool page_switch_scheduled_ = false;
 
     // ---- Esc/Home key tracking (see attach_esc_handling) ----
+    // The device exposes several keypad-capable evdev nodes (vc4-hdmi CEC,
+    // gpio_ir_recv, tca8418c keyboard), each its own POLL-mode indev that
+    // reports LV_EVENT_KEY with state RELEASED on every read while idle.
+    // Tracking is therefore bound to the indev that pressed Esc/Home: an
+    // idle node's RELEASED report must never count as the Esc release.
     bool esc_down_ = false;
     bool esc_long_fired_ = false;
+    lv_indev_t* esc_indev_ = nullptr;
+    model::AppPage esc_page_ = model::AppPage::Menu;
     bool home_down_ = false;
+    lv_indev_t* home_indev_ = nullptr;
     uint32_t esc_pressed_at_ = 0;
+
+    // ---- Double-Esc to leave the title (Menu) ----
+    void arm_title_quit();
+    void disarm_title_quit();
+    static void title_quit_timeout_cb(lv_timer_t* timer);
+    lv_timer_t* title_quit_timer_ = nullptr;
 
     // ---- Interrupt-confirm modal (overlay on the current screen) ----
     lv_obj_t* interrupt_modal_ = nullptr;

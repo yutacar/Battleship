@@ -112,6 +112,13 @@ public:
     /// observes this to add/remove the overlay on top of whatever screen is
     /// currently loaded, independent of AppPage navigation.
     lv_subject_t* interrupt_modal_subject();
+    /// True for a short window after the first Esc on the title (Menu):
+    /// a second Esc inside that window exits to the launcher. The Menu
+    /// screen observes this to swap its "Esc x2: Quit" hint for "Press Esc
+    /// again to quit". Driven by ScreenManager.
+    lv_subject_t* title_quit_armed_subject();
+    void set_title_quit_armed(bool armed);
+    bool title_quit_armed() const;
 
     bool is_dark_mode() const;
     void toggle_dark_mode();
@@ -448,6 +455,7 @@ private:
     reactive::IntSubject net_hosts_dirty_subject_;
     reactive::IntSubject language_version_subject_;
     reactive::BoolSubject interrupt_modal_subject_;
+    reactive::BoolSubject title_quit_armed_subject_;
     bool interrupt_modal_visible_ = false;
 };
 

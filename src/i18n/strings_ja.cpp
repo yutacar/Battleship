@@ -16,6 +16,8 @@ const Table kJapaneseTable = [] {
     Table t{};
     t[static_cast<std::size_t>(StrId::AppTitle)] = "Battleship";
     t[static_cast<std::size_t>(StrId::ComingSoon)] = "（近日公開）";
+    t[static_cast<std::size_t>(StrId::MenuQuitHint)] = "Esc x2: 終了";
+    t[static_cast<std::size_t>(StrId::MenuQuitArmed)] = "もう一度 Esc で終了";
     t[static_cast<std::size_t>(StrId::Back)] = "戻る";
     t[static_cast<std::size_t>(StrId::Cancel)] = "キャンセル";
     t[static_cast<std::size_t>(StrId::Connect)] = "接続";
