@@ -1,7 +1,7 @@
 {
   "package_name": "battleship",
   "app_name": "Battleship",
-  "version": "1.0.0-2",
+  "version": "1.0.0-3",
   "description": "Classic naval combat for CardputerZero: 1-player vs a local probability-density AI (with template battle commentary), or 2-player over BLE (default) or WiFi.",
   "store": {
     "summary": "Classic naval combat: 1P vs AI or 2P over BLE/WiFi.",
