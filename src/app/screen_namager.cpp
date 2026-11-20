@@ -317,7 +317,10 @@ void ScreenManager::handle_short_esc() {
     const auto page = has_loaded_page_ ? loaded_page_ : view_model_.current_page();
     switch (page) {
         case model::AppPage::Menu:
-            // Root screen: nothing above it. Long Esc / Home exits.
+            // Root screen: "one level up" from the title is the launcher's
+            // home screen, so a short Esc exits the app here (long Esc /
+            // Home keep exiting from anywhere).
+            handle_safe_exit();
             break;
         case model::AppPage::Settings:
         case model::AppPage::Difficulty:

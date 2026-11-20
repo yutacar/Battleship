@@ -76,7 +76,7 @@ void DifficultyScreen::build_content(lv_obj_t* content) {
 
     for (const auto& entry : kDifficultyEntries) {
         auto* button = lv_button_create(menu);
-        lv_obj_set_size(button, 240, 24);
+        lv_obj_set_size(button, 280, 24);
         reactive::bind_theme(button, view_model().dark_mode_subject(), reactive::ThemeRole::Button);
 
         auto* label = lv_label_create(button);
@@ -94,7 +94,7 @@ void DifficultyScreen::build_content(lv_obj_t* content) {
     }
 
     auto* back_button = lv_button_create(menu);
-    lv_obj_set_size(back_button, 240, 22);
+    lv_obj_set_size(back_button, 280, 22);
     reactive::bind_theme(back_button, view_model().dark_mode_subject(), reactive::ThemeRole::Button);
     auto* back_label = lv_label_create(back_button);
     lv_label_set_text(back_label, tr(StrId::Back));
