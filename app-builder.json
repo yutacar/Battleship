@@ -1,11 +1,25 @@
 {
   "package_name": "battleship",
   "app_name": "Battleship",
-  "version": "1.0.0",
+  "version": "1.0.0-1",
   "description": "Classic naval combat for CardputerZero: 1-player vs a local probability-density AI (with template battle commentary), or 2-player over BLE (default) or WiFi.",
   "store": {
     "summary": "Classic naval combat: 1P vs AI or 2P over BLE/WiFi.",
+    "description": "A classic naval combat puzzle game built for CardputerZero. Play solo against a local probability-density AI (three difficulty levels) with live battle commentary. Play two-player over built-in Bluetooth (BLE, the default, no access point needed) or WiFi LAN against another CardputerZero. The UI switches between English, Japanese, and Simplified Chinese instantly from Settings.",
     "categories": ["Games"],
+    "permissions": {
+      "camera": false,
+      "microphone": false,
+      "imu": false,
+      "network": true,
+      "additional_hardware": false,
+      "background_service": false,
+      "external_display": false
+    },
+    "author": { "display_name": "YutaCar", "github": "yutacar" },
+    "license": "MIT",
+    "source_repo": "https://github.com/yutacar/Battleship",
+    "share_code": "BSHP",
     "icon": "assets/images/battleship.png",
     "screenshots": [
       "store/screenshots/main.png",

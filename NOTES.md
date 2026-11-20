@@ -2177,3 +2177,44 @@ device`）まで到達 —— 共有ライブラリのロードは全て成功�
   依存解決成功、`ldd` not found ゼロ、`apt-get remove` でクリーンに除去
 - 公式 `prepublish_check.py`: **`Prepublish check passed.`**
   （ERROR 0 / WARNING 0）
+
+## 20. ストア再提出（2026-11-20）— 審査プロセスのリセットへの対応
+
+### 20.1 何が起きていたか
+PR CardputerZero/packages#59（battleship 1.0.0）は 2026-07-15 にマージされて
+いたが、**2026-10-12 にメンテナが「Delete all current apps to restart the
+submit and review process」（packages リポジトリ commit `e107f92b`）で
+battleship・chainled を含む全 40 アプリを削除**した。このため Store から
+ダウンロードできなくなっていた。新プロセスで再提出が必要。
+
+### 20.2 新プロセス（cardputerzero.github.io docs/ja/CP0_submit.md, CP0_dev.md）
+- czdev は **`CardputerZero/AppBuilder`**（旧 m5stack/CardputerZero-AppBuilder は
+  リダイレクト）。ラッパー `./czdev` 復活、非コラボレーターの 403 も上流で修正済み。
+  ただし git push は依然 SSH 決め打ちのため、SSH 鍵の無いこの Mac では
+  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf
+  GIT_CONFIG_VALUE_0=git@github.com:` を付けて実行（gh の credential helper で HTTPS 化、
+  ソース改変なし）
+- Web 提出チャネル https://dev.cardputer.cc/ も追加（どちらも同じ検証）
+- **新規アプリの初回提出は人手審査 + PR コメント欄への実機デモ動画（起動・主要機能・
+  終了）が必須**。動画が無いと審査を通らない。以後のバージョン更新は検証通過で自動マージ
+- app-builder.json `store` に必須項目追加: `permissions`（7項目すべて bool）、
+  `author.display_name`、`license`（SPDX）、`share_code`（4桁英数字・ストア内一意）。
+  `source_repo` 推奨。summary は 80 字以内。サーバー側ルールは packages リポジトリ
+  `.github/scripts/store_meta_policy.py`
+- .deb ファイル名は `packagename_version-revision_arm64.deb` 形式を推奨
+  （CI が強制するのは `pkg_version_arch.deb` との一致のみ）
+
+### 20.3 対応内容
+- app-builder.json: permissions（network のみ true）、author `YutaCar`/`yutacar`、
+  license MIT、source_repo、share_code **`BSHP`**（既存 121 アプリと重複なしを確認）、
+  store.description を追加。version を `1.0.0-1` に
+- cmake/cm0-package.cmake: `APP_DEBIAN_REVISION`（既定 1）を追加し
+  `CPACK_DEBIAN_PACKAGE_RELEASE` で Version `1.0.0-1`、ファイル名
+  `battleship_1.0.0-1_arm64.deb`。Maintainer は noreply アドレス（前回修正分をコミット）
+- BSP は **v0.0.7** に更新（v0.0.4 と違い、tarball 直下がそのまま sysroot。
+  `sysroot/` サブディレクトリは無い）
+- 検証: `store_meta_policy.py` をライブの pool と照合して ERROR 0 / WARNING 0、
+  NEEDED 6 = Depends 6、クリーン trixie で install / ldd / remove OK、
+  デスクトップ ctest 143/143 green
+- `battleship_1.0.0-1_arm64.deb`: 965782 バイト、sha256
+  `32d86ca7419e6ae2f638e5cbe5fd09abc091c3a751f2e533a8ce3862857ccc63`
