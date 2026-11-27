@@ -23,6 +23,10 @@ struct FakeBusConfig {
     double loss_rate = 0;
     std::uint32_t seed = 1;
     bool use_airtime = true;
+    // Cross-radio carrier sense (listen-before-talk): try_start_transmit()
+    // returns Busy while another radio's transmission is on air. Mirrors the
+    // real SX1262 LBT/CAD. Set false to model hidden terminals (collisions).
+    bool carrier_sense = false;
 };
 
 class FakeRadioBus;
@@ -35,8 +39,9 @@ struct TxRecord {
 };
 
 // Half duplex: a packet is heard only by radios that were not transmitting
-// when it started. There is no cross-radio carrier sense (hidden terminals);
-// Busy comes only from set_channel_busy() or the radio's own transmission.
+// when it started. Busy comes from set_channel_busy(), the radio's own
+// transmission, or (FakeBusConfig::carrier_sense, default off) another radio's
+// transmission that is still on air.
 class FakeRadio : public IRadio {
 public:
     bool ready() const override;

@@ -19,6 +19,13 @@ RadioStart FakeRadio::try_start_transmit(const std::uint8_t* data, std::size_t s
     if (!ready_) return RadioStart::Failed;
     if (size == 0 || size > kMaxRadioPacket) return RadioStart::Failed;
     if (bus_.busy_ || tx_pending_) return RadioStart::Busy;
+    if (bus_.cfg_.carrier_sense) {
+        for (const auto& other : bus_.radios_) {
+            if (other.get() != this && other->tx_pending_ && other->tx_.end > bus_.now_) {
+                return RadioStart::Busy;
+            }
+        }
+    }
     tx_.bytes.assign(data, data + size);
     tx_.start = bus_.now_;
     tx_.end = bus_.now_ + (bus_.cfg_.use_airtime ? bus_.policy_.airtime_ms(size) : 0);
