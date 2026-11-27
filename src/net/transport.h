@@ -25,7 +25,7 @@ namespace battleship::net {
 
 /// Current connection state of a transport.
 enum class TransportState {
-    Connecting,   ///< handshake/connect in progress (e.g. TCP connect() pending)
+    Connecting,   ///< handshake/connect in progress (e.g. BLE GATT connect pending)
     Connected,    ///< ready to send/receive
     Disconnected, ///< closed or failed; no further send/receive will succeed
 };

@@ -13,6 +13,7 @@
 
 #include "commentary/commentator_factory.h"
 #include "i18n/settings.h"
+#include "net/host_name.h"
 #include "net/ble/ble_transport.h"  // kBleNamePrefix only (header is safe on every platform)
 #include "net/lora/japan920_policy.h"
 
@@ -52,16 +53,9 @@ std::string coord_label(Coord c) {
     return buf;
 }
 
-// ---- Network play (Phase 4) ----
+// ---- Network play ----
 
-/// Default TCP port a host listens on. Distinct from the UDP discovery port
-/// (net::kDiscoveryPort, 35353) so both sockets can coexist. If this port is
-/// taken (e.g. a second instance on the same machine during 2-process
-/// desktop testing), the host falls back to an OS-assigned port, which the
-/// discovery announcement then advertises.
-constexpr uint16_t kNetGamePort = 35354;
-
-/// How often the network poll timer services session/announcer/discoverer.
+/// How often the network poll timer services session/scanner.
 /// 100ms keeps worst-case added latency well under one LVGL redraw's notice
 /// while staying far coarser than needed for the protocol timeouts
 /// (ACK 400ms, PING 2s, disconnect 10s) -- and never blocks the LVGL thread
@@ -270,8 +264,7 @@ model::AppPage BaseViewModel::current_page() const {
 
 void BaseViewModel::show_page(model::AppPage page) {
     if (page == model::AppPage::Menu &&
-        (net_session_ || net_transport_ || net_discovering_ || net_announcing_ || net_poll_timer_ ||
-         net_lora_link_)) {
+        (net_session_ || net_poll_timer_ || net_lora_link_)) {
         // Returning to the title from anywhere in the network flow (Result's
         // Title button, the NetError dialog, ...) always abandons the
         // session/lobby/discovery -- there is no way to "background" a
@@ -925,8 +918,8 @@ lv_subject_t* BaseViewModel::net_hosts_dirty_subject() {
 
 void BaseViewModel::open_network_menu() {
     teardown_network();
-    // Phase 6: Network Play starts at the connection-type screen (BLE
-    // default / WiFi / LoRa placeholder), then proceeds to Host/Join.
+    // Network Play starts at the connection-type screen (BLE default /
+    // LoRa), then proceeds to Host/Join.
     show_page(model::AppPage::NetTransport);
 }
 
@@ -980,7 +973,7 @@ void BaseViewModel::start_network_host() {
     }
 
 #if BATTLESHIP_BLE
-    if (net_using_ble()) {
+    {
         net_flow_ble_ = true;
         net_ble_transport_ = std::make_unique<battleship::net::BleTransport>();
         const std::string host_name = battleship::net::local_host_name();
@@ -1006,36 +999,11 @@ void BaseViewModel::start_network_host() {
         show_page(model::AppPage::NetLobby);
         return;
     }
+#else
+    // No BLE in this build (desktop) and LoRa not selected: nothing can run.
+    net_status_subject_.set(i18n::tr(i18n::StrId::NetBleUnavailable));
+    show_page(model::AppPage::NetError);
 #endif
-
-    net_transport_ = std::make_unique<battleship::net::TcpTransport>();
-    // Preferred fixed port first (predictable for Direct IP joins); fall
-    // back to an OS-assigned one when it is taken -- notably the second
-    // instance during 2-process testing on one machine. Discovery announces
-    // whichever port was actually bound.
-    if (!net_transport_->listen(kNetGamePort) && !net_transport_->listen(0)) {
-        net_transport_.reset();
-        net_status_subject_.set(i18n::tr(i18n::StrId::NetCouldNotOpenPort));
-        show_page(model::AppPage::NetError);
-        return;
-    }
-
-    net_is_host_ = true;
-    net_session_ = std::make_unique<battleship::net::NetSession>(
-        *net_transport_, battleship::net::SessionRole::Host, rng_());
-    net_seen_change_counter_ = 0;
-    net_seen_phase_ = battleship::net::SessionPhase::Handshake;
-
-    net_announcing_ = net_announcer_.start(battleship::net::local_host_name(),
-                                           net_transport_->local_port());
-
-    net_status_subject_.set(i18n::trf(i18n::StrId::NetLobbyYourAddress,
-                                      battleship::net::local_ipv4_address().c_str(),
-                                      static_cast<unsigned>(net_transport_->local_port()))
-                                .c_str());
-
-    ensure_net_poll_timer();
-    show_page(model::AppPage::NetLobby);
 }
 
 void BaseViewModel::start_network_join() {
@@ -1057,7 +1025,7 @@ void BaseViewModel::start_network_join() {
     }
 
 #if BATTLESHIP_BLE
-    if (net_using_ble()) {
+    {
         net_flow_ble_ = true;
         net_ble_scanning_ = net_ble_scanner_.start();
         net_hosts_signature_ = 0;
@@ -1068,15 +1036,11 @@ void BaseViewModel::start_network_join() {
         show_page(model::AppPage::NetJoin);
         return;
     }
+#else
+    // No BLE in this build (desktop) and LoRa not selected: nothing can run.
+    net_status_subject_.set(i18n::tr(i18n::StrId::NetBleUnavailable));
+    show_page(model::AppPage::NetError);
 #endif
-
-    net_discovering_ = net_discoverer_.start();
-    net_hosts_signature_ = 0;
-    net_status_subject_.set(i18n::tr(net_discovering_ ? i18n::StrId::NetJoinSearching
-                                                        : i18n::StrId::NetJoinDiscoveryUnavailable));
-    ensure_net_poll_timer();
-    net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
-    show_page(model::AppPage::NetJoin);
 }
 
 size_t BaseViewModel::net_peer_count() const {
@@ -1088,7 +1052,7 @@ size_t BaseViewModel::net_peer_count() const {
         return net_ble_scanner_.results().size();
     }
 #endif
-    return net_discoverer_.hosts().size();
+    return 0;
 }
 
 std::string BaseViewModel::net_peer_label(size_t index) const {
@@ -1113,38 +1077,9 @@ std::string BaseViewModel::net_peer_label(size_t index) const {
         return text;
     }
 #endif
-    const auto& hosts = net_discoverer_.hosts();
-    if (index >= hosts.size()) {
-        return {};
-    }
-    std::snprintf(text, sizeof(text), "%s (%s:%u)", hosts[index].name.c_str(),
-                  hosts[index].ip.c_str(), static_cast<unsigned>(hosts[index].tcp_port));
-    return text;
-}
-
-bool BaseViewModel::net_connect_to(const std::string& ip, uint16_t port) {
-    net_transport_ = std::make_unique<battleship::net::TcpTransport>();
-    if (!net_transport_->connect(ip, port)) {
-        net_transport_.reset();
-        net_status_subject_.set(i18n::tr(i18n::StrId::NetCouldNotStartConnection));
-        return false;
-    }
-
-    net_discoverer_.stop();
-    net_discovering_ = false;
-    net_is_host_ = false;
-    net_session_ = std::make_unique<battleship::net::NetSession>(
-        *net_transport_, battleship::net::SessionRole::Client, rng_());
-    net_seen_change_counter_ = 0;
-    net_seen_phase_ = battleship::net::SessionPhase::Handshake;
-
-    net_status_subject_.set(i18n::trf(i18n::StrId::NetLobbyConnectingTo, ip.c_str(),
-                                      static_cast<unsigned>(port))
-                                .c_str());
-
-    ensure_net_poll_timer();
-    show_page(model::AppPage::NetLobby);
-    return true;
+    (void)index;
+    (void)text;
+    return {};
 }
 
 void BaseViewModel::join_host_at(size_t index) {
@@ -1205,51 +1140,9 @@ void BaseViewModel::join_host_at(size_t index) {
         show_page(model::AppPage::NetLobby);
         return;
     }
+#else
+    (void)index;
 #endif
-
-    const auto& hosts = net_discoverer_.hosts();
-    if (index >= hosts.size()) {
-        return;
-    }
-    // Copy before net_connect_to() -- it stops the discoverer, which clears
-    // the hosts vector this element lives in.
-    const auto host = hosts[index];
-    net_connect_to(host.ip, host.tcp_port);
-}
-
-bool BaseViewModel::join_direct(const char* text) {
-    if (!text) {
-        return false;
-    }
-
-    // Accept "ip" or "ip:port"; tolerate surrounding whitespace.
-    std::string spec(text);
-    const auto first = spec.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) {
-        return false;
-    }
-    const auto last = spec.find_last_not_of(" \t\r\n");
-    spec = spec.substr(first, last - first + 1);
-
-    std::string ip = spec;
-    uint16_t port = kNetGamePort;
-    const auto colon = spec.find(':');
-    if (colon != std::string::npos) {
-        ip = spec.substr(0, colon);
-        try {
-            const int parsed = std::stoi(spec.substr(colon + 1));
-            if (parsed <= 0 || parsed > 65535) {
-                return false;
-            }
-            port = static_cast<uint16_t>(parsed);
-        } catch (const std::exception&) {
-            return false;
-        }
-    }
-    if (ip.empty()) {
-        return false;
-    }
-    return net_connect_to(ip, port);
 }
 
 void BaseViewModel::cancel_network() {
@@ -1262,12 +1155,7 @@ void BaseViewModel::teardown_network() {
         lv_timer_delete(net_poll_timer_);
         net_poll_timer_ = nullptr;
     }
-    net_announcer_.stop();
-    net_discoverer_.stop();
-    net_announcing_ = false;
-    net_discovering_ = false;
     net_session_.reset();
-    net_transport_.reset();
     // LoRa after the session (which references the transport).
     net_lora_begin_close();
     net_flow_lora_ = false;
@@ -1409,27 +1297,11 @@ void BaseViewModel::net_poll_timer_cb(lv_timer_t* timer) {
 void BaseViewModel::net_poll() {
     const uint32_t now = lv_tick_get();
 
-    if (net_announcing_) {
-        net_announcer_.poll(now);
-    }
-    if (net_discovering_) {
-        net_discoverer_.poll(now);
-        // Cheap change detection so the Join screen only rebuilds its list
-        // when something actually changed.
-        size_t signature = net_discoverer_.hosts().size() * 1000003u;
-        for (const auto& host : net_discoverer_.hosts()) {
-            signature = signature * 31u + std::hash<std::string>{}(host.ip) + host.tcp_port;
-        }
-        if (signature != net_hosts_signature_) {
-            net_hosts_signature_ = signature;
-            net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
-        }
-    }
 #if BATTLESHIP_BLE
     if (net_ble_scanning_) {
         net_ble_scanner_.poll(now);
-        // Same cheap change detection as WiFi discovery above, over the BLE
-        // scan results (device_path is the stable identity key).
+        // Cheap change detection so the Join screen only rebuilds its list
+        // when something changed, over the BLE scan results (device_path is the stable identity key).
         size_t signature = net_ble_scanner_.results().size() * 1000003u;
         for (const auto& result : net_ble_scanner_.results()) {
             signature = signature * 31u + std::hash<std::string>{}(result.device_path);
@@ -1576,12 +1448,7 @@ void BaseViewModel::net_sync_session_state() {
             case SessionPhase::Placement:
                 if (previous_phase == SessionPhase::Handshake) {
                     // Connection up + HELLO exchanged: the match begins.
-                    // Stop advertising/scanning (host must vanish from other
-                    // players' Join lists once paired).
-                    net_announcer_.stop();
-                    net_announcing_ = false;
-                    net_discoverer_.stop();
-                    net_discovering_ = false;
+                    // (BLE/LoRa advertising stops with the link once paired.)
 
                     cancel_ai_turn();
                     match_mode_ = MatchMode::Network;

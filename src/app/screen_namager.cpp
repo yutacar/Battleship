@@ -16,7 +16,6 @@
 #include "handover_screen.h"
 #include "menu_screen.h"
 #include "net_antenna_screen.h"
-#include "net_direct_ip_screen.h"
 #include "net_error_screen.h"
 #include "net_join_screen.h"
 #include "net_lobby_screen.h"
@@ -222,9 +221,6 @@ void ScreenManager::show_screen_for_page(model::AppPage page) {
         case model::AppPage::NetJoin:
             load_screen(std::make_unique<screen::NetJoinScreen>(view_model_, assets_));
             break;
-        case model::AppPage::NetDirectIp:
-            load_screen(std::make_unique<screen::NetDirectIpScreen>(view_model_, assets_));
-            break;
         case model::AppPage::NetError:
             load_screen(std::make_unique<screen::NetErrorScreen>(view_model_, assets_));
             break;
@@ -405,9 +401,6 @@ void ScreenManager::handle_short_esc() {
         case model::AppPage::NetLobby:
         case model::AppPage::NetJoin:
             view_model_.cancel_network();  // back to the Host/Join menu
-            break;
-        case model::AppPage::NetDirectIp:
-            view_model_.show_page(model::AppPage::NetJoin);
             break;
         case model::AppPage::Placement:
         case model::AppPage::Handover:

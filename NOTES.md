@@ -964,7 +964,7 @@ BATTLESHIP_NET_AUTOPILOT=lose APP_SCRIPT="500:key:down:300:key:down:300:key:ente
    デバッグを混乱させた → `setvbuf(stdout, _IOLBF)` を app 起動時に設定。
 
 スクリーンショット（docs/screenshots/、全て目視確認済み）:
-`net_host_waiting` / `net_join_list`（発見ホスト表示）/ `net_join_direct_ip` /
+`net_host_waiting` / `net_join_list`（発見ホスト表示）/
 `net_placement` / `net_ready_wait`（相手配置待ち）/ `net_battle_host` +
 `net_battle_join`（同一対戦の両画面、状態表示が相互整合）/
 `net_result_host_win` + `net_result_join_lose`（Run1: Host 勝ち）/

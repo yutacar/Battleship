@@ -41,7 +41,7 @@ void NetLobbyScreen::build_content(lv_obj_t* content) {
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
     reactive::bind_theme(title, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
 
-    // Host: "Your address: <ip>:<port>". Client: "Connecting to <ip>:<port>".
+    // Host: "Advertising as BSHIP-<host>". Client: "Connecting to <peer>".
     // Kept live via the subject so e.g. an error message can replace it.
     auto* status = lv_label_create(content);
     // Wrapped (and centered): "Recruiting over LoRa as BSHIP-<host> ..." can

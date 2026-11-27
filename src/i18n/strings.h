@@ -128,31 +128,18 @@ enum class StrId {
 
     // ---- Network menu ----
     NetworkPlayTitle,
-    NetworkPlayHint,
     NetworkHostGame,
     NetworkJoinGame,
 
     // ---- Net lobby ----
     NetLobbyHostingTitle,
     NetLobbyJoiningTitle,
-    NetLobbyYourAddress,           ///< "Your address: %s:%u"
-    NetLobbyConnectingTo,          ///< "Connecting to %s:%u ..."
     NetLobbyWaitingForOpponent,
     NetLobbyWaitingForHost,
-    NetCouldNotOpenPort,
     NetCouldNotStartConnection,
 
     // ---- Net join ----
     NetJoinTitle,
-    NetJoinSearching,
-    NetJoinDiscoveryUnavailable,
-    NetDirectIpButton,
-
-    // ---- Net direct IP ----
-    NetDirectIpTitle,
-    NetDirectIpHint,
-    NetDirectIpPlaceholder,
-    NetDirectIpInvalidAddress,
 
     // ---- Net error ----
     NetErrorTitle,
@@ -162,7 +149,6 @@ enum class StrId {
     // ---- Net transport select (Phase 6) ----
     NetTransportTitle,             ///< "Connection Type" screen title
     NetTransportBle,               ///< "Bluetooth (BLE)" -- default, top row
-    NetTransportWifi,              ///< "WiFi (LAN)"
     NetTransportLora,              ///< "LoRa" (Phase 8; selectable on every build)
     NetTransportDeviceOnly,        ///< " (device only)" suffix when BATTLESHIP_BLE=0
     NetTransportMethodLine,        ///< "Method: %s" hint on the Host/Join menu

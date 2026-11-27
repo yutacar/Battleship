@@ -89,28 +89,17 @@ const Table kChineseTable = [] {
     t[static_cast<std::size_t>(StrId::ResultTitle)] = "返回标题";
 
     t[static_cast<std::size_t>(StrId::NetworkPlayTitle)] = "联网对战";
-    t[static_cast<std::size_t>(StrId::NetworkPlayHint)] = "双方需连接同一WiFi网络";
     t[static_cast<std::size_t>(StrId::NetworkHostGame)] = "创建主机";
     t[static_cast<std::size_t>(StrId::NetworkJoinGame)] = "加入对战";
 
     t[static_cast<std::size_t>(StrId::NetLobbyHostingTitle)] = "主机中";
     t[static_cast<std::size_t>(StrId::NetLobbyJoiningTitle)] = "连接中";
-    t[static_cast<std::size_t>(StrId::NetLobbyYourAddress)] = "你的地址: %s:%u";
-    t[static_cast<std::size_t>(StrId::NetLobbyConnectingTo)] = "正在连接 %s:%u ...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForOpponent)] = "等待对手加入...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForHost)] = "等待主机响应...";
-    t[static_cast<std::size_t>(StrId::NetCouldNotOpenPort)] = "无法打开TCP端口";
     t[static_cast<std::size_t>(StrId::NetCouldNotStartConnection)] = "无法建立连接";
 
     t[static_cast<std::size_t>(StrId::NetJoinTitle)] = "加入对战";
-    t[static_cast<std::size_t>(StrId::NetJoinSearching)] = "正在搜索主机...";
-    t[static_cast<std::size_t>(StrId::NetJoinDiscoveryUnavailable)] = "搜索不可用 - 请用IP直接输入";
-    t[static_cast<std::size_t>(StrId::NetDirectIpButton)] = "IP直接输入";
 
-    t[static_cast<std::size_t>(StrId::NetDirectIpTitle)] = "IP直接输入";
-    t[static_cast<std::size_t>(StrId::NetDirectIpHint)] = "输入主机IP（端口可选）";
-    t[static_cast<std::size_t>(StrId::NetDirectIpPlaceholder)] = "192.168.1.20";
-    t[static_cast<std::size_t>(StrId::NetDirectIpInvalidAddress)] = "地址无效（例如 192.168.1.20）";
 
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "网络错误";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "确定 - 返回标题";
@@ -118,7 +107,6 @@ const Table kChineseTable = [] {
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "连接方式";
     t[static_cast<std::size_t>(StrId::NetTransportBle)] = "蓝牙 (BLE)";
-    t[static_cast<std::size_t>(StrId::NetTransportWifi)] = "WiFi (LAN)";
     t[static_cast<std::size_t>(StrId::NetTransportLora)] = "LoRa";
     t[static_cast<std::size_t>(StrId::NetTransportDeviceOnly)] = "（仅实机）";
     t[static_cast<std::size_t>(StrId::NetTransportMethodLine)] = "连接方式：%s";

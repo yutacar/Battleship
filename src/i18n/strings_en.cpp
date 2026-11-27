@@ -90,28 +90,17 @@ const Table kEnglishTable = [] {
     t[static_cast<std::size_t>(StrId::ResultTitle)] = "Title";
 
     t[static_cast<std::size_t>(StrId::NetworkPlayTitle)] = "Network Play";
-    t[static_cast<std::size_t>(StrId::NetworkPlayHint)] = "Both players must be on the same WiFi network";
     t[static_cast<std::size_t>(StrId::NetworkHostGame)] = "Host Game";
     t[static_cast<std::size_t>(StrId::NetworkJoinGame)] = "Join Game";
 
     t[static_cast<std::size_t>(StrId::NetLobbyHostingTitle)] = "Hosting Game";
     t[static_cast<std::size_t>(StrId::NetLobbyJoiningTitle)] = "Joining Game";
-    t[static_cast<std::size_t>(StrId::NetLobbyYourAddress)] = "Your address: %s:%u";
-    t[static_cast<std::size_t>(StrId::NetLobbyConnectingTo)] = "Connecting to %s:%u ...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForOpponent)] = "Waiting for an opponent to join...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForHost)] = "Waiting for the host to respond...";
-    t[static_cast<std::size_t>(StrId::NetCouldNotOpenPort)] = "Could not open a TCP port";
     t[static_cast<std::size_t>(StrId::NetCouldNotStartConnection)] = "Could not start connection";
 
     t[static_cast<std::size_t>(StrId::NetJoinTitle)] = "Join Game";
-    t[static_cast<std::size_t>(StrId::NetJoinSearching)] = "Searching for hosts on your network...";
-    t[static_cast<std::size_t>(StrId::NetJoinDiscoveryUnavailable)] = "Discovery unavailable - use Direct IP";
-    t[static_cast<std::size_t>(StrId::NetDirectIpButton)] = "Direct IP";
 
-    t[static_cast<std::size_t>(StrId::NetDirectIpTitle)] = "Direct IP";
-    t[static_cast<std::size_t>(StrId::NetDirectIpHint)] = "Type the host's IP (port optional, ip:port)";
-    t[static_cast<std::size_t>(StrId::NetDirectIpPlaceholder)] = "192.168.1.20";
-    t[static_cast<std::size_t>(StrId::NetDirectIpInvalidAddress)] = "Invalid address - try e.g. 192.168.1.20";
 
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "Network";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "OK - back to title";
@@ -119,7 +108,6 @@ const Table kEnglishTable = [] {
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "Connection Type";
     t[static_cast<std::size_t>(StrId::NetTransportBle)] = "Bluetooth (BLE)";
-    t[static_cast<std::size_t>(StrId::NetTransportWifi)] = "WiFi (LAN)";
     t[static_cast<std::size_t>(StrId::NetTransportLora)] = "LoRa";
     t[static_cast<std::size_t>(StrId::NetTransportDeviceOnly)] = " (device only)";
     t[static_cast<std::size_t>(StrId::NetTransportMethodLine)] = "Method: %s";

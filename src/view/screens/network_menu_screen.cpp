@@ -66,19 +66,13 @@ void NetworkMenuScreen::build_content(lv_obj_t* content) {
     reactive::bind_theme(title, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
 
     auto* hint = lv_label_create(content);
-    // WiFi keeps the same-network reminder from Phase 4; BLE needs no AP, so
-    // it just restates the selected method ("Method: Bluetooth (BLE)").
-    // LoRa likewise just restates the method.
-    std::string hint_text;
-    if (view_model().net_using_lora()) {
-        hint_text = i18n::trf(i18n::StrId::NetTransportMethodLine,
-                              i18n::tr(i18n::StrId::NetTransportLora));
-    } else if (view_model().net_using_ble()) {
-        hint_text = i18n::trf(i18n::StrId::NetTransportMethodLine,
-                              i18n::tr(i18n::StrId::NetTransportBle));
-    } else {
-        hint_text = i18n::tr(i18n::StrId::NetworkPlayHint);
-    }
+    // Restates the selected method ("Method: Bluetooth (BLE)" / LoRa). A BLE
+    // preference on a build without BLE still reads BLE; Host/Join then
+    // report that it is unavailable.
+    const std::string hint_text = i18n::trf(
+        i18n::StrId::NetTransportMethodLine,
+        i18n::tr(view_model().net_using_lora() ? i18n::StrId::NetTransportLora
+                                               : i18n::StrId::NetTransportBle));
     lv_label_set_text(hint, hint_text.c_str());
     lv_obj_set_style_text_font(hint, i18n::font_for_size(12), 0);
     lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 34);

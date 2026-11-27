@@ -30,11 +30,10 @@ struct TransportEntry {
     bool selectable;         ///< false renders a disabled "(Coming soon)" row
 };
 
-constexpr std::array<TransportEntry, 3> kTransportEntries = {{
+constexpr std::array<TransportEntry, 2> kTransportEntries = {{
     {StrId::NetTransportBle, NetTransportPref::Ble, true},    // default, top row
-    {StrId::NetTransportWifi, NetTransportPref::Wifi, true},
-    // Phase 8: enabled on every build, independent of the BLE device-only
-    // gating below (desktop builds use the UDP radio simulator).
+    // Enabled on every build, independent of the BLE device-only gating
+    // below (desktop builds use the UDP radio simulator).
     {StrId::NetTransportLora, NetTransportPref::Lora, true},
 }};
 

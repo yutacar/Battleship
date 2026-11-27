@@ -45,8 +45,6 @@ constexpr TemplateArity kTemplates[] = {
     {StrId::ResultHitRateLineP1, 3},
     {StrId::ResultHitRateLineP2, 3},
     {StrId::ResultTotalTurns, 1},
-    {StrId::NetLobbyYourAddress, 2},
-    {StrId::NetLobbyConnectingTo, 2},
     {StrId::NetLoraHostingAs, 1},
     {StrId::BattleStatsLine, 4},
     {StrId::BattleStatsSunkLine, 2},

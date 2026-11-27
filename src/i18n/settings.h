@@ -21,20 +21,20 @@ namespace i18n {
 
 /// Preferred 2-player connection method (Phase 6, PLAN.md §2.2 "マッチング
 /// UI の接続方式選択"). Persisted alongside the language in the same
-/// settings.conf ("transport=ble|wifi|lora") -- which is why it lives in this
-/// settings module despite not being an i18n concern: the file is a single
+/// settings.conf ("transport=ble|lora"; a legacy "wifi" value loads as Ble)
+/// -- which is why it lives in this settings module despite not being an
+/// i18n concern: the file is a single
 /// flat key=value store and exactly one writer must own it (both save_*()
 /// functions rewrite the whole file with every known key). Default is Ble --
 /// BLE is the product's default connection method (PLAN.md Rev.3). On
 /// builds without BLE support (BATTLESHIP_BLE=0, e.g. the macOS desktop
 /// build) the UI treats Ble as "unavailable on this build" WITHOUT
 /// rewriting the preference, so the same settings file still preselects BLE
-/// on the device. Lora (Phase 8, "transport=lora") is available on every
+/// on the device. Lora ("transport=lora") is available on every
 /// build: the device drives the Cap LoRa-1262, the desktop build a UDP
 /// loopback-multicast radio simulator (net/lora/radio_factory.h).
 enum class NetTransportPref {
     Ble,
-    Wifi,
     Lora,
 };
 

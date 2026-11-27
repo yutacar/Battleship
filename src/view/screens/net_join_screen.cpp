@@ -23,7 +23,7 @@ namespace {
 
 struct JoinUi {
     viewmodel::BaseViewModel* view_model = nullptr;
-    lv_obj_t* list = nullptr;             ///< container for discovered-host buttons
+    lv_obj_t* list = nullptr;             ///< container for peer buttons
     lv_obj_t* empty_label = nullptr;      ///< "Searching..." placeholder
     lv_observer_t* hosts_observer = nullptr;
 };
@@ -34,7 +34,7 @@ void host_button_cb(lv_event_t* event) {
     if (!ui || !ui->view_model || !button) {
         return;
     }
-    // The host's index in net_hosts() rides in the button user_data. The
+    // The peer's index (net_peer_*) rides in the button user_data. The
     // list is rebuilt on every host-list change, so an index captured at
     // build time always matches the current vector.
     const auto index = reinterpret_cast<uintptr_t>(lv_obj_get_user_data(button));
@@ -46,8 +46,8 @@ void rebuild_host_list(JoinUi* ui) {
         return;
     }
     auto& view_model = *ui->view_model;
-    // Transport-agnostic peer list (Phase 6): WiFi -> UDP discovery hosts,
-    // BLE -> scan results. join_host_at() accepts the same index space.
+    // Transport-agnostic peer list: BLE scan results or LoRa beacon peers.
+    // join_host_at() accepts the same index space.
     const size_t peer_count = view_model.net_peer_count();
 
     // Keep keyboard focus on the same row across rebuilds: the LoRa list is
@@ -105,13 +105,6 @@ void list_delete_cb(lv_event_t* event) {
     delete ui;
 }
 
-void direct_ip_cb(lv_event_t* event) {
-    auto* view_model = static_cast<viewmodel::BaseViewModel*>(lv_event_get_user_data(event));
-    if (view_model) {
-        view_model->show_page(model::AppPage::NetDirectIp);
-    }
-}
-
 void back_cb(lv_event_t* event) {
     auto* view_model = static_cast<viewmodel::BaseViewModel*>(lv_event_get_user_data(event));
     if (view_model) {
@@ -136,8 +129,8 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
     reactive::bind_theme(title, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
 
-    // Discovered-host list (middle strip). Up to ~4 hosts fit; realistically
-    // a LAN has one or two Battleship hosts at a time.
+    // Peer list (middle strip). Up to ~4 hosts fit; realistically only one
+    // or two Battleship hosts are in range at a time.
     auto* list = lv_obj_create(content);
     lv_obj_remove_style_all(list);
     lv_obj_set_size(list, LV_PCT(100), 100);
@@ -148,20 +141,16 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_clear_flag(list, LV_OBJ_FLAG_SCROLLABLE);
     ui->list = list;
 
-    const bool ble = view_model().net_using_ble();
-    const bool lora = view_model().net_using_lora();
-
     auto* empty = lv_label_create(content);
-    lv_label_set_text(empty, i18n::tr(lora  ? i18n::StrId::NetJoinScanningLora
-                                      : ble ? i18n::StrId::NetJoinScanningBle
-                                            : i18n::StrId::NetJoinSearching));
+    lv_label_set_text(empty, i18n::tr(view_model().net_using_lora()
+                                          ? i18n::StrId::NetJoinScanningLora
+                                          : i18n::StrId::NetJoinScanningBle));
     lv_obj_set_style_text_font(empty, i18n::font_for_size(12), 0);
     lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 64);
     reactive::bind_theme(empty, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
     ui->empty_label = empty;
 
-    // Bottom row: Direct IP fallback (WiFi only -- BLE/LoRa have no address
-    // to type; scan results are the only join path) + Back.
+    // Bottom row: Back (scan results are the only join path).
     auto* buttons = lv_obj_create(content);
     lv_obj_remove_style_all(buttons);
     lv_obj_set_size(buttons, LV_PCT(100), 28);
@@ -170,21 +159,6 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_set_flex_align(buttons, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(buttons, 12, 0);
     lv_obj_clear_flag(buttons, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t* direct_button = nullptr;
-    if (!ble && !lora) {
-        direct_button = lv_button_create(buttons);
-        lv_obj_set_size(direct_button, 120, 24);
-        reactive::bind_theme(direct_button, view_model().dark_mode_subject(),
-                             reactive::ThemeRole::Button);
-        auto* direct_label = lv_label_create(direct_button);
-        lv_label_set_text(direct_label, i18n::tr(i18n::StrId::NetDirectIpButton));
-        lv_obj_set_style_text_font(direct_label, i18n::font_for_size(12), 0);
-        lv_obj_center(direct_label);
-        lv_obj_add_event_cb(direct_button, direct_ip_cb, LV_EVENT_CLICKED, &view_model());
-        lv_group_add_obj(BaseScreen::shared_group(), direct_button);
-        BaseScreen::enable_arrow_focus_navigation(direct_button);
-    }
 
     auto* back_button = lv_button_create(buttons);
     lv_obj_set_size(back_button, 120, 24);
@@ -203,7 +177,7 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
         reactive::observe(view_model().net_hosts_dirty_subject(), hosts_dirty_cb, ui);
 
     rebuild_host_list(ui);
-    lv_group_focus_obj(direct_button ? direct_button : back_button);
+    lv_group_focus_obj(back_button);
 }
 
 } // namespace screen

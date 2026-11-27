@@ -113,27 +113,39 @@ TEST_F(I18nSettingsTest, TransportPrefDefaultsToBleWithNoFile) {
 }
 
 TEST_F(I18nSettingsTest, SaveTransportPrefThenLoadRestoresIt) {
-    i18n::save_net_transport_pref(i18n::NetTransportPref::Wifi);
-    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Wifi);  // applied live
+    i18n::save_net_transport_pref(i18n::NetTransportPref::Lora);
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);  // applied live
 
     // Simulate a restart: reset the in-memory value, then reload.
     i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
     i18n::load_settings();
-    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Wifi);
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);
 }
 
 TEST_F(I18nSettingsTest, SavingTransportPreservesLanguageAndViceVersa) {
     // Both save_*() entry points rewrite the whole file; neither may drop
     // the other key (regression guard for the shared settings.conf).
     i18n::save_language(Lang::ZH);
-    i18n::save_net_transport_pref(i18n::NetTransportPref::Wifi);
-    i18n::save_language(Lang::JA);  // must not clobber transport=wifi
+    i18n::save_net_transport_pref(i18n::NetTransportPref::Lora);
+    i18n::save_language(Lang::JA);  // must not clobber transport=lora
 
     i18n::set_language(Lang::EN);
     i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
     i18n::load_settings();
     EXPECT_EQ(i18n::current_language(), Lang::JA);
-    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Wifi);
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);
+}
+
+TEST_F(I18nSettingsTest, LegacyWifiTransportLoadsAsBle) {
+    const auto dir = std::filesystem::path(i18n::settings_file_path()).parent_path();
+    std::filesystem::create_directories(dir);
+    std::ofstream file(i18n::settings_file_path());
+    file << "transport=wifi\n";
+    file.close();
+
+    i18n::set_net_transport_pref(i18n::NetTransportPref::Lora);
+    i18n::load_settings();
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Ble);
 }
 
 TEST_F(I18nSettingsTest, LoadSettingsIgnoresUnknownTransportValue) {

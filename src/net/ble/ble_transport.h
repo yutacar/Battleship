@@ -27,7 +27,7 @@
  * per WriteValue / notification, so a single ATT PDU at the BT 4.2 default
  * MTU always suffices -- no fragmentation layer, no MTU negotiation. The
  * higher layers (FrameDecoder / ReliableLink / NetSession) treat this as an
- * ordinary byte stream exactly like TCP, and the frame decoder's
+ * ordinary byte stream, and the frame decoder's
  * resynchronization tolerates any chunking anyway.
  *
  * Security scope (deliberate, PLAN.md Phase 6): Just Works connections only.
@@ -66,9 +66,8 @@ inline constexpr const char* kNusServiceUuid = "6e400001-b5a3-f393-e0a9-e50e24dc
 inline constexpr const char* kNusRxCharUuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  ///< central -> peripheral (Write)
 inline constexpr const char* kNusTxCharUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";  ///< peripheral -> central (Notify)
 
-/// Prefix of the advertised LE local name, mirroring the "BSHIP" magic of
-/// the WiFi UDP discovery payload (net/discovery.h) so joiners can filter
-/// scan results by name as well as by service UUID.
+/// Prefix of the advertised LE local name, so joiners can filter scan
+/// results by name as well as by service UUID.
 inline constexpr const char* kBleNamePrefix = "BSHIP-";
 
 /// One advertising Battleship host as seen by a scanning joiner.
@@ -79,7 +78,7 @@ struct BleScanResult {
 };
 
 /// Join side: LE discovery with a NUS/name filter, poll-driven host list
-/// (the BLE counterpart of net::UdpDiscoverer).
+/// (the BLE counterpart of the LoRa beacon scan).
 class BleScanner {
 public:
     BleScanner();

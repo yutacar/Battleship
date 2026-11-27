@@ -11,8 +11,8 @@
 namespace screen {
 
 /// Network lobby (Phase 4): shown while waiting for the connection to come
-/// up. Host: "Waiting for opponent..." + own IP:port (so the other player
-/// can Direct-IP join even without discovery). Client: "Connecting to ...".
+/// up. Host: "Waiting for opponent..." + the advertised name. Client:
+/// "Connecting to ...".
 /// Once the HELLO handshake completes, BaseViewModel's net poll timer
 /// navigates to Placement automatically; Cancel tears the session down.
 class NetLobbyScreen : public BaseScreen {

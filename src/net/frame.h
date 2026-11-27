@@ -5,8 +5,7 @@
  *
  * Wire frame codec for networked play (PLAN.md §2.2). Transport-agnostic: no
  * sockets, no LVGL, no threads -- just byte encode/decode so it can run over
- * TCP today and a LoRa serial transport later without change (PLAN.md 2.2 /
- * 7). Frame layout (all multi-byte integers big-endian):
+ * BLE and LoRa transports alike without change (PLAN.md 2.2 / 7). Frame layout (all multi-byte integers big-endian):
  *
  *   [MAGIC(2B)] [ver(1B)] [type(1B)] [seq(1B)] [len(1B)] [payload(len B)] [CRC16(2B)]
  *

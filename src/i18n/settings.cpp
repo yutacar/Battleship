@@ -54,8 +54,6 @@ std::string transport_to_key(NetTransportPref pref) {
     switch (pref) {
         case NetTransportPref::Ble:
             return "ble";
-        case NetTransportPref::Wifi:
-            return "wifi";
         case NetTransportPref::Lora:
             return "lora";
     }
@@ -68,7 +66,9 @@ bool key_to_transport(const std::string& key, NetTransportPref& out) {
         return true;
     }
     if (key == "wifi") {
-        out = NetTransportPref::Wifi;
+        // WiFi play was removed in 1.1.0; existing users who persisted
+        // "transport=wifi" fall back to the default (BLE).
+        out = NetTransportPref::Ble;
         return true;
     }
     if (key == "lora") {

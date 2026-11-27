@@ -602,13 +602,14 @@ target_link_libraries(battleship_i18n
 )
 
 # ====================================================
-# battleship_net sources (Phase 4)
+# battleship_net sources
 # - Wire frame codec (MAGIC/ver/type/seq/len/payload/CRC16), typed message
 #   payloads, stop-and-wait reliability layer, ITransport abstraction with
-#   Loopback (test, fault-injectable) + TCP (WiFi v1) implementations, UDP
-#   LAN discovery, and the NetSession match state machine over PlayerView.
+#   a Loopback (test, fault-injectable) implementation (BLE and LoRa live in
+#   net/ble and net/lora), and the NetSession match state machine over
+#   PlayerView.
 # - No LVGL dependency: poll-driven, clock-injected, fully unit-testable
-#   headlessly. POSIX sockets only (macOS desktop + CM0 Linux alike).
+#   headlessly.
 # - Namespace: battleship::net
 # ====================================================
 file(GLOB_RECURSE BATTLESHIP_NET_SOURCES CONFIGURE_DEPENDS
