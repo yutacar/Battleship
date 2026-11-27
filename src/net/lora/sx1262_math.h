@@ -47,6 +47,8 @@ constexpr bool sx1262_lbt_config_valid(std::uint32_t carrier_sense_ms,
 
 // GetRssiInst reads a stale value (the previous packet's AGC level) for a
 // short time after SetRx; samples are only valid this long after re-arm.
+// Measured: first GetRssiInst 73-156 us after SetRx read a stale -68..-75 dBm
+// (NOTES.md section 21), so 1 ms is used before RSSI sampling starts.
 inline constexpr std::uint32_t kRssiSettleUs = 1000U;
 
 // Remaining wait before carrier-sense RSSI samples are valid; 0 when settled.
