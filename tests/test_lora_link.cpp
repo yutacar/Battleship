@@ -306,14 +306,16 @@ TEST(LoraLink, PolicyDeferralRespected) {
     run(bus, {&host.link, &client.link}, t + kStep, t + 8000);
     for (const IRadio* r : {static_cast<const IRadio*>(&host.radio), static_cast<const IRadio*>(&client.radio)}) {
         std::uint64_t prev = 0;
+        std::size_t prev_bytes = 0;
         bool first = true;
         int n = 0;
         for (const auto& rec : bus.tx_log()) {
             if (rec.radio != r) continue;
             if (!first) {
-                EXPECT_GE(rec.start_ms - prev, 100u);
+                EXPECT_GE(rec.start_ms, prev + Japan920Policy{}.airtime_ms(prev_bytes) + 50u);
             }
             prev = rec.start_ms;
+            prev_bytes = rec.bytes.size();
             first = false;
             ++n;
         }

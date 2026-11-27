@@ -16,6 +16,8 @@ namespace battleship::net::lora {
 namespace {
 
 constexpr std::size_t kMaximumDatagramBytes = 255U;
+// ARIB limit is < 4 s per emission; this project keeps a 10x margin.
+constexpr RadioTick kMaximumAirtimeMs = 400U;
 
 RadioTick saturating_add(RadioTick left, RadioTick right) noexcept {
     const auto maximum = std::numeric_limits<RadioTick>::max();
@@ -25,10 +27,10 @@ RadioTick saturating_add(RadioTick left, RadioTick right) noexcept {
 } // namespace
 
 bool Japan920Profile::valid() const noexcept {
-    constexpr std::uint32_t kCertifiedLowerHz = 920'500'000U;
-    // The published Cap LoRa-1262 range ends at 923 MHz. Keep the entire
-    // occupied 125 kHz channel inside that documented hardware range.
-    constexpr std::uint32_t kCapUpperHz = 923'000'000U;
+    // ARIB STD-T108 channels 24-32 (center 920.6-922.2 MHz): 20 mW,
+    // 5 ms carrier sense, < 4 s emission, 50 ms pause, no hourly cap.
+    constexpr std::uint32_t kLowerCenterHz = 920'600'000U;
+    constexpr std::uint32_t kUpperCenterHz = 922'200'000U;
     if (bandwidth_hz != 125'000U ||
         spreading_factor < 7U || spreading_factor > 12U ||
         coding_rate_denominator < 5U || coding_rate_denominator > 8U ||
@@ -37,44 +39,30 @@ bool Japan920Profile::valid() const noexcept {
         sync_word != 0x12U) {
         return false;
     }
-    const auto half_bandwidth = bandwidth_hz / 2U;
-    return frequency_hz >= kCertifiedLowerHz + half_bandwidth &&
-           frequency_hz <= kCapUpperHz - half_bandwidth;
+    return frequency_hz >= kLowerCenterHz && frequency_hz <= kUpperCenterHz;
 }
 
 Japan920Policy::Japan920Policy(Japan920PolicyConfig config) noexcept
-    : config_(config),
-      tokens_ms_(config.bucket_capacity_ms),
-      valid_(config.profile.valid() &&
-             config.minimum_gap_ms > 0U &&
-             config.bucket_capacity_ms > 0U &&
-             config.refill_denominator > 0U) {}
+    : config_(config), valid_(config.profile.valid()) {}
 
 TxDecision Japan920Policy::evaluate(
     RadioTick now_ms, std::size_t bytes) noexcept {
     if (!valid_ || bytes == 0U || bytes > kMaximumDatagramBytes) {
         return {TxDecisionStatus::Invalid, 0U};
     }
-    if (clock_started_ && now_ms < last_refill_ms_) {
+    if (clock_started_ && now_ms < last_now_ms_) {
         valid_ = false;
         return {TxDecisionStatus::Locked, 0U};
     }
+    clock_started_ = true;
+    last_now_ms_ = now_ms;
 
-    refill(now_ms);
     const auto airtime = airtime_ms(bytes);
-    if (airtime == 0U || airtime > config_.bucket_capacity_ms) {
+    if (airtime == 0U || airtime > kMaximumAirtimeMs) {
         return {TxDecisionStatus::Invalid, 0U};
     }
     if (now_ms < next_transmit_ms_) {
         return {TxDecisionStatus::Deferred, next_transmit_ms_};
-    }
-    if (tokens_ms_ < airtime) {
-        const auto deficit = airtime - tokens_ms_;
-        return {TxDecisionStatus::Deferred,
-                saturating_add(
-                    now_ms,
-                    deficit * static_cast<RadioTick>(
-                                  config_.refill_denominator))};
     }
     return {TxDecisionStatus::Allowed, now_ms};
 }
@@ -88,8 +76,8 @@ void Japan920Policy::record(RadioTick now_ms, std::size_t bytes) noexcept {
         valid_ = false;
         return;
     }
-    tokens_ms_ -= airtime_ms(bytes);
-    next_transmit_ms_ = saturating_add(now_ms, config_.minimum_gap_ms);
+    next_transmit_ms_ = saturating_add(
+        saturating_add(now_ms, airtime_ms(bytes)), config_.pause_after_emission_ms);
 }
 
 bool Japan920Policy::valid() const noexcept {
@@ -127,22 +115,6 @@ RadioTick Japan920Policy::airtime_ms(std::size_t bytes) const noexcept {
         return 0U;
     }
     return static_cast<RadioTick>(std::ceil(milliseconds));
-}
-
-void Japan920Policy::refill(RadioTick now_ms) noexcept {
-    if (!clock_started_) {
-        clock_started_ = true;
-        last_refill_ms_ = now_ms;
-        return;
-    }
-    const auto elapsed = now_ms - last_refill_ms_;
-    const auto added =
-        elapsed / static_cast<RadioTick>(config_.refill_denominator);
-    if (added > 0U) {
-        tokens_ms_ = std::min(config_.bucket_capacity_ms,
-                              saturating_add(tokens_ms_, added));
-        last_refill_ms_ = now_ms;
-    }
 }
 
 } // namespace battleship::net::lora

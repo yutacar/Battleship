@@ -3,8 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Japan 920 MHz LoRa transmit policy (fixed Battleship profile + token-bucket
- * airtime budget). Ported from LoraMessenger
+ * Japan 920 MHz LoRa transmit policy (fixed Battleship profile + ARIB STD-T108
+ * ch24-32 rules: emission < 4 s, 50 ms pause after each emission, no hourly
+ * airtime cap). Ported from LoraMessenger
  * (src/adapters/radio/japan_920_radio_policy.{h,cpp}, MIT, same author),
  * with the profile changed to 921.8 MHz / SF7 / CR 4/5 and the ports::
  * dependency removed. Headless: no LVGL, no hardware access.
@@ -33,9 +34,9 @@ struct Japan920Profile {
 
 struct Japan920PolicyConfig {
     Japan920Profile profile;
-    RadioTick minimum_gap_ms{100U};
-    RadioTick bucket_capacity_ms{6'000U};
-    std::uint32_t refill_denominator{10U};
+    // ARIB STD-T108 (channels 24-32): pause measured from the END of our own
+    // emission before the next one may start.
+    RadioTick pause_after_emission_ms{50U};
 };
 
 enum class TxDecisionStatus { Allowed, Deferred, Locked, Invalid };
@@ -45,9 +46,11 @@ struct TxDecision {
     RadioTick not_before_ms{0U};
 };
 
-// Conservative congestion budget: the token bucket permits at most 10%
-// long-term calculated airtime by default. Listen-before-talk is still the
-// transport's responsibility.
+// Enforces the per-emission limit (calculated airtime must be < 4 s, enforced
+// as <= 400 ms here) and the pause after the previous emission's end.
+// Listen-before-talk (carrier sense >= 5 ms) is the transport's responsibility.
+// record() of a decision that is not Allowed is a protocol error and
+// invalidates the policy.
 class Japan920Policy {
 public:
     explicit Japan920Policy(Japan920PolicyConfig config = {}) noexcept;
@@ -59,11 +62,8 @@ public:
     bool valid() const noexcept;
 
 private:
-    void refill(RadioTick now_ms) noexcept;
-
     Japan920PolicyConfig config_;
-    RadioTick tokens_ms_{0U};
-    RadioTick last_refill_ms_{0U};
+    RadioTick last_now_ms_{0U};
     RadioTick next_transmit_ms_{0U};
     bool clock_started_{false};
     bool valid_{false};

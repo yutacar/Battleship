@@ -37,6 +37,17 @@ TEST(LoraPolicy, RejectsIllegalProfiles) {
     p.frequency_hz = 923'000'000U;
     EXPECT_FALSE(p.valid());
     p = {};
+    p.frequency_hz = 922'400'000U;
+    EXPECT_FALSE(p.valid());
+    p = {};
+    p.frequency_hz = 920'500'000U;
+    EXPECT_FALSE(p.valid());
+    p = {};
+    p.frequency_hz = 920'600'000U;
+    EXPECT_TRUE(p.valid());
+    p.frequency_hz = 922'200'000U;
+    EXPECT_TRUE(p.valid());
+    p = {};
     p.sync_word = 0x34U;
     EXPECT_FALSE(p.valid());
 }
@@ -49,35 +60,47 @@ TEST(LoraPolicy, AirtimeSf7) {
     EXPECT_LE(policy.airtime_ms(65), 135U);
 }
 
-TEST(LoraPolicy, MinimumGapDefers) {
+TEST(LoraPolicy, PauseIsMeasuredFromEmissionEnd) {
     Japan920Policy policy;
-    ASSERT_EQ(policy.evaluate(0, 18).status, TxDecisionStatus::Allowed);
-    policy.record(0, 18);
-    const auto d = policy.evaluate(50, 18);
-    EXPECT_EQ(d.status, TxDecisionStatus::Deferred);
-    EXPECT_EQ(d.not_before_ms, 100U);
+    const RadioTick air = policy.airtime_ms(65);
+    ASSERT_EQ(policy.evaluate(0, 65).status, TxDecisionStatus::Allowed);
+    policy.record(0, 65);
+    const auto early = policy.evaluate(air + 49, 18);
+    EXPECT_EQ(early.status, TxDecisionStatus::Deferred);
+    EXPECT_EQ(early.not_before_ms, air + 50);
+    EXPECT_EQ(policy.evaluate(air + 50, 18).status, TxDecisionStatus::Allowed);
 }
 
-TEST(LoraPolicy, BucketLimitsLongTermDuty) {
+TEST(LoraPolicy, NoHourlyCapOnCh24to32) {
     Japan920Policy policy;
+    const RadioTick air = policy.airtime_ms(18);
     RadioTick t = 0;
-    bool deferred = false;
-    for (int i = 0; i < 300 && !deferred; ++i, t += 100) {
-        if (policy.evaluate(t, 18).status == TxDecisionStatus::Allowed) {
-            policy.record(t, 18);
-        } else {
-            deferred = true;
-        }
+    RadioTick total = 0;
+    while (t < 3'600'000U) {
+        const auto d = policy.evaluate(t, 18);
+        ASSERT_EQ(d.status, TxDecisionStatus::Allowed) << "t=" << t;
+        policy.record(t, 18);
+        total += air;
+        const auto next = policy.evaluate(t, 18);
+        ASSERT_EQ(next.status, TxDecisionStatus::Deferred);
+        ASSERT_EQ(next.not_before_ms, t + air + 50);
+        t = next.not_before_ms;
     }
-    ASSERT_TRUE(deferred);
+    EXPECT_GT(total, 360'000U);
+}
 
-    RadioTick recorded = 0;
-    const RadioTick end = t + 60'000;
-    for (; t < end; t += 100) {
-        if (policy.evaluate(t, 18).status == TxDecisionStatus::Allowed) {
-            policy.record(t, 18);
-            recorded += policy.airtime_ms(18);
-        }
-    }
-    EXPECT_LE(recorded, 60'000U / 10U + policy.airtime_ms(18));
+TEST(LoraPolicy, AirtimeOfLargestPacketBelowLimit) {
+    Japan920Policy policy;
+    EXPECT_LE(policy.airtime_ms(80), 400U);
+    // Even the 255-byte maximum is exactly 400 ms: allowed (rule is > 400 Invalid).
+    EXPECT_EQ(policy.airtime_ms(255), 400U);
+    EXPECT_EQ(policy.evaluate(0, 255).status, TxDecisionStatus::Allowed);
+    EXPECT_EQ(policy.evaluate(0, 0).status, TxDecisionStatus::Invalid);
+    EXPECT_EQ(policy.evaluate(0, 256).status, TxDecisionStatus::Invalid);
+}
+
+TEST(LoraPolicy, ClockRegressionLocks) {
+    Japan920Policy policy;
+    ASSERT_EQ(policy.evaluate(1000, 18).status, TxDecisionStatus::Allowed);
+    EXPECT_EQ(policy.evaluate(999, 18).status, TxDecisionStatus::Locked);
 }
