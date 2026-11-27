@@ -45,7 +45,9 @@ struct LinkTiming {
     // long after the last packet received from the air. After its own TX the
     // peer's SX1262 sits deaf in standby until its poll() services TxDone and
     // re-arms RX (poll interval + re-arm time); replying sooner than that
-    // would land in the peer's deaf window and be lost. Must exceed the peer's
+    // would land in the peer's deaf window and be lost. The reference time is
+    // the poll() that decoded the packet, so the real gap is >= this value.
+    // Must exceed the peer's
     // poll interval (10 ms on device) with margin.
     std::uint32_t rx_turnaround_ms = 40;
 };

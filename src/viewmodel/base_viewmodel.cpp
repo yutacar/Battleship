@@ -69,7 +69,7 @@ constexpr uint16_t kNetGamePort = 35354;
 constexpr uint32_t kNetPollIntervalMs = 100;
 // LoRa: the SX1262 sits deaf in standby after every TX until poll() services
 // TxDone and re-arms RX, so the radio must be serviced much faster than the
-// UI-rate net poll (see LoRaLink::LinkTiming::rx_turnaround_ms).
+// UI-rate net poll (see LinkTiming::rx_turnaround_ms in lora_link.h).
 constexpr uint32_t kLoRaPollIntervalMs = 10;
 
 // ---- LoRa (Phase 8) ----

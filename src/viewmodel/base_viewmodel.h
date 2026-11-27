@@ -372,7 +372,8 @@ private:
     /// Shared connect path for join_host_at / join_direct: builds the TCP
     /// transport + client NetSession and moves to the lobby screen.
     bool net_connect_to(const std::string& ip, uint16_t port);
-    /// 100ms LVGL timer driving all net polling (session, announcer,
+    /// LVGL timer driving all net polling (100ms; 10ms for LoRa, where the
+    /// UI-side work below is still throttled to 100ms) (session, announcer,
     /// discoverer) plus reactive mirroring of session state into subjects /
     /// page navigation. Never blocks: every net/ API is non-blocking.
     static void net_poll_timer_cb(lv_timer_t* timer);

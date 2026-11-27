@@ -400,28 +400,32 @@ struct DeafNode {
         : radio(bus.add_radio()), link(radio, Japan920Policy{}, seed, timing), poll_ms(poll) {}
 };
 
-FakeBusConfig deaf_cfg() {
+FakeBusConfig deaf_cfg(bool deaf = true) {
     FakeBusConfig c;
     c.carrier_sense = true;
-    c.deaf_until_poll = true;
+    c.deaf_until_poll = deaf;
     return c;
 }
 
 // 1 ms simulation clock; each node is polled on its own period grid.
+// The client is polled when t % period == client_phase, before the host in the
+// same iteration; a nonzero phase makes the host's reply start while the
+// client is still deaf (same-phase polling hides this because the host's reply
+// starts in the very tick the client re-arms).
 // Returns true when both links are Connected within 20 s.
-bool deaf_connect(FakeRadioBus& bus, DeafNode& host, DeafNode& client) {
+bool deaf_connect(FakeRadioBus& bus, DeafNode& host, DeafNode& client, std::uint64_t client_phase = 0) {
     host.link.start_host("HOST", 0);
     client.link.start_scan(0);
     bool joined = false;
     for (std::uint64_t t = 0; t < 20000; ++t) {
         bus.advance_to(t);
-        if (t % host.poll_ms == 0) host.link.poll(t);
-        if (t % client.poll_ms == 0) {
+        if (t % client.poll_ms == client_phase) {
             client.link.poll(t);
             if (!joined && !client.link.peers().empty()) {
                 joined = client.link.join(client.link.peers()[0].session_id, t);
             }
         }
+        if (t % host.poll_ms == 0) host.link.poll(t);
         if (host.link.state() == LinkState::Connected && client.link.state() == LinkState::Connected) return true;
     }
     return false;
@@ -449,6 +453,38 @@ TEST(LoraLinkDeaf, WithoutGuardAndSlowPollJoinFails) {
     DeafNode client(bus, 2, timing, 100);
     EXPECT_FALSE(deaf_connect(bus, host, client));
     EXPECT_EQ(client.link.state(), LinkState::Failed);
+}
+
+TEST(LoraLinkDeaf, OffsetPollPhaseNeedsTurnaroundGuard) {
+    for (std::uint64_t phase : {1, 2, 3}) {
+        SCOPED_TRACE("client phase " + std::to_string(phase));
+        {
+            LinkTiming timing; // guard 40
+            FakeRadioBus bus(deaf_cfg());
+            DeafNode host(bus, 1, timing, 10);
+            DeafNode client(bus, 2, timing, 10);
+            EXPECT_TRUE(deaf_connect(bus, host, client, phase));
+        }
+        {
+            LinkTiming timing;
+            timing.rx_turnaround_ms = 0;
+            FakeRadioBus bus(deaf_cfg());
+            DeafNode host(bus, 1, timing, 10);
+            DeafNode client(bus, 2, timing, 10);
+            EXPECT_FALSE(deaf_connect(bus, host, client, phase));
+        }
+    }
+}
+
+TEST(LoraLinkDeaf, NoDeafnessControlConnectsWithSlowPollAndNoGuard) {
+    // Same setup as WithoutGuardAndSlowPollJoinFails, but the radio is never
+    // deaf: proves the failure there comes from the deafness model.
+    LinkTiming timing;
+    timing.rx_turnaround_ms = 0;
+    FakeRadioBus bus(deaf_cfg(false));
+    DeafNode host(bus, 1, timing, 10);
+    DeafNode client(bus, 2, timing, 100);
+    EXPECT_TRUE(deaf_connect(bus, host, client));
 }
 
 TEST(LoraLinkDeaf, DataFlowsBothWaysUnderDeafness) {

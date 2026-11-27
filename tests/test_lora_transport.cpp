@@ -44,6 +44,22 @@ struct Rig {
     std::unique_ptr<net::NetSession> client;
 
     uint64_t step = kStep; // poll period used by connect()
+    // Deaf rigs poll the client first and the host this many ms later in each
+    // tick, so a reply can start while the other side is still deaf (polling
+    // both in the same instant hides the turnaround problem).
+    uint64_t host_offset = 8;
+    bool fine_advance = false; // deaf rigs advance the bus in 1 ms steps
+    uint64_t bus_now = 0;
+
+    // Delivery must happen at the packet's end time (not at the next coarse
+    // tick), otherwise the receiver's deaf window would be quantised away.
+    void advance_bus(uint64_t to) {
+        if (fine_advance) {
+            for (uint64_t u = bus_now + 1; u < to; ++u) bus.advance_to(u);
+        }
+        bus.advance_to(to);
+        if (to > bus_now) bus_now = to;
+    }
 
     Rig(double loss, uint32_t seed, bool deaf = false, uint64_t poll_ms = kStep)
         : bus(FakeBusConfig{loss, seed, true, true, deaf}),
@@ -54,6 +70,10 @@ struct Rig {
           transport_host(link_host, [this] { return now; }),
           transport_client(link_client, [this] { return now; }) {
         step = poll_ms;
+        if (deaf) {
+            host_offset = 8;
+            fine_advance = true;
+        }
     }
 
     void make_sessions(uint32_t seed) {
@@ -66,11 +86,13 @@ struct Rig {
     // One simulated tick at absolute time t; sessions are polled when present.
     void tick(uint64_t t) {
         now = t;
-        bus.advance_to(now);
-        link_host.poll(now);
+        advance_bus(now);
         link_client.poll(now);
-        if (host) host->poll(static_cast<uint32_t>(now));
         if (client) client->poll(static_cast<uint32_t>(now));
+        now = t + host_offset;
+        advance_bus(now);
+        link_host.poll(now);
+        if (host) host->poll(static_cast<uint32_t>(now));
     }
 
     // Beacon -> scan -> join until both links are Connected. Returns false on timeout.
@@ -161,8 +183,6 @@ TEST(LoRaTransport, FullGameUnderRxDeafnessWithTenMsPolling) {
         ASSERT_TRUE(rig.connect());
         rig.make_sessions(seed);
         play_full_game(rig, seed);
-        std::printf("[game deaf] seed %u: %llu ms sim, %zu packets\n", seed,
-                    (unsigned long long)rig.now, rig.bus.tx_log().size());
         battleship::testing::expect_consistent_final_state(*rig.host, *rig.client);
     }
 }
