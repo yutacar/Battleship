@@ -239,3 +239,68 @@ TEST(LoRaTransport, SilentPeerDisconnectsWithinTimeout) {
                 static_cast<unsigned long long>(t_disc - last_rx));
     EXPECT_LE(t_disc - last_rx, 20000u + kStep);
 }
+
+// ---------------------------------------------------------------------------
+// UdpSimRadio: two instances in one process over real multicast sockets.
+// ---------------------------------------------------------------------------
+#include <chrono>
+#include <thread>
+
+#include "net/lora/radio_factory.h"
+#include "net/lora/udp_sim_radio.h"
+
+TEST(LoraUdpSim, UdpSimTwoInstancesExchange) {
+    constexpr uint16_t kPort = 35361;
+    UdpSimRadio ra(0.0, kPort);
+    UdpSimRadio rb(0.0, kPort);
+    if (!ra.ready() || !rb.ready()) GTEST_SKIP() << "multicast socket unavailable";
+
+    LoRaLink host(ra, Japan920Policy{}, 11);
+    LoRaLink joiner(rb, Japan920Policy{}, 22);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    auto now_ms = [&] {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - t0).count());
+    };
+    host.start_host("SIM", now_ms());
+    joiner.start_scan(now_ms());
+
+    bool joined_called = false;
+    bool host_got = false, joiner_got = false, sent = false;
+    std::vector<uint8_t> in_h, in_j;
+    const uint8_t ping[] = {1, 2, 3}, pong[] = {9, 8, 7, 6};
+    while (now_ms() < 10000 && !(host_got && joiner_got)) {
+        host.poll(now_ms());
+        joiner.poll(now_ms());
+        if (!joined_called && !joiner.peers().empty()) {
+            joined_called = joiner.join(joiner.peers()[0].session_id, now_ms());
+        }
+        if (!sent && host.state() == LinkState::Connected &&
+            joiner.state() == LinkState::Connected) {
+            sent = host.send_data(ping, sizeof(ping)) && joiner.send_data(pong, sizeof(pong));
+        }
+        if (host.take_received(in_h) > 0) host_got = true;
+        if (joiner.take_received(in_j) > 0) joiner_got = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!joined_called) GTEST_SKIP() << "no multicast loopback delivery in this environment";
+    EXPECT_EQ(host.state(), LinkState::Connected);
+    EXPECT_EQ(joiner.state(), LinkState::Connected);
+    ASSERT_TRUE(host_got);
+    ASSERT_TRUE(joiner_got);
+    EXPECT_EQ(in_h, std::vector<uint8_t>(pong, pong + sizeof(pong)));
+    EXPECT_EQ(in_j, std::vector<uint8_t>(ping, ping + sizeof(ping)));
+}
+
+TEST(LoraUdpSim, FactoryHardwareUnavailableOrSim) {
+    auto h = open_radio(RadioBackend::UdpSim);
+    EXPECT_NE(h.radio, nullptr);
+    EXPECT_EQ(h.power, nullptr);
+#if !BATTLESHIP_LORA_HW
+    EXPECT_EQ(default_radio_backend(), RadioBackend::UdpSim);
+    auto hw = open_radio(RadioBackend::Hardware);
+    EXPECT_EQ(hw.radio, nullptr);
+    EXPECT_EQ(hw.error, RadioInitError::SpiOpenFailed);
+#endif
+}
