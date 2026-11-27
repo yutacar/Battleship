@@ -47,6 +47,11 @@ public:
 
     RadioInitError init_error() const noexcept;
 
+    // Timing for hardware verification (Task 7): duration of the last
+    // try_start_transmit call (incl. carrier sense) and of the last RX re-arm.
+    std::uint32_t last_tx_start_us() const noexcept;
+    std::uint32_t last_rx_rearm_us() const noexcept;
+
     bool ready() const override;
     RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) override;
     RadioPoll poll(std::uint8_t* dst, std::size_t cap) override;

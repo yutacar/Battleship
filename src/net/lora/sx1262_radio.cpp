@@ -88,6 +88,9 @@ constexpr std::uint8_t kExplicitHeader = 0x00U;
 constexpr std::uint8_t kCrcEnabled = 0x01U;
 constexpr std::uint8_t kStandardIq = 0x00U;
 constexpr std::uint8_t kStandbyRc = 0x00U;
+constexpr std::uint8_t kStandbyXosc = 0x01U;
+constexpr std::uint8_t kSetRxTxFallbackMode = 0x93U;
+constexpr std::uint8_t kFallbackStandbyXosc = 0x30U;
 constexpr std::uint8_t kRegulatorDcdc = 0x01U;
 constexpr std::uint8_t kTcxo3Volts = 0x06U;
 constexpr std::uint32_t kTcxoDelayUnits = 320U;     // 5 ms / 15.625 us
@@ -169,7 +172,14 @@ struct Sx1262Radio::Impl {
 
     ~Impl() { shutdown(); }
 
-    bool ready() const noexcept { return initialized && !closed; }
+    // Latched on any SPI/GPIO failure after init: ready() then stays false so
+    // LoRaLink drops the radio instead of polling a dead device forever.
+    bool ready() const noexcept { return initialized && !closed && !faulted; }
+
+    RadioStart fault_tx() noexcept {
+        faulted = true;
+        return RadioStart::Failed;
+    }
 
     // Busy-wait on the BUSY pin; bounded, <= 100 us sleeps.
     bool wait_while_busy() noexcept {
@@ -382,7 +392,19 @@ struct Sx1262Radio::Impl {
         return write_command(kSetPacketParams, arguments, sizeof(arguments));
     }
 
+    static std::uint32_t elapsed_us(Clock::time_point from) noexcept {
+        return static_cast<std::uint32_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - from).count());
+    }
+
     bool start_receive() noexcept {
+        const auto t0 = Clock::now();
+        const bool ok = start_receive_untimed();
+        last_rx_rearm_us = elapsed_us(t0);
+        return ok;
+    }
+
+    bool start_receive_untimed() noexcept {
         if (!set_packet_params(kMaxRadioPacket) || !clear_irq() || !set_irq_mask(kReceiveIrqs)) {
             return false;
         }
@@ -430,6 +452,7 @@ struct Sx1262Radio::Impl {
         const std::uint8_t image[]{0xe1U, 0xe9U};
         const std::uint8_t packet_type[]{kLoRaPacketType};
         const std::uint8_t buffer_base[]{0U, 0U};
+        const std::uint8_t fallback[]{kFallbackStandbyXosc};
         if (!write_command(kSetStandby, standby, sizeof(standby))) {
             init_error = RadioInitError::RadioNoResponse;
             return false;
@@ -439,7 +462,10 @@ struct Sx1262Radio::Impl {
             !write_command(kCalibrate, calibrate, sizeof(calibrate)) ||
             !write_command(kCalibrateImage, image, sizeof(image)) ||
             !write_command(kSetPacketType, packet_type, sizeof(packet_type)) ||
-            !write_command(kSetBufferBaseAddress, buffer_base, sizeof(buffer_base))) {
+            !write_command(kSetBufferBaseAddress, buffer_base, sizeof(buffer_base)) ||
+            // After TX/RX return to STDBY_XOSC so the DIO3 TCXO stays running
+            // and SetTx/SetRx do not wait for the 5 ms TCXO start-up again.
+            !write_command(kSetRxTxFallbackMode, fallback, sizeof(fallback))) {
             init_error = RadioInitError::ConfigFailed;
             return false;
         }
@@ -561,7 +587,7 @@ struct Sx1262Radio::Impl {
             std::uint8_t raw_rssi = 0U;
             if (!gpio_get(irq_descriptor, irq_high) ||
                 !read_command(kGetRssiInst, nullptr, 0U, &raw_rssi, 1U)) {
-                return RadioStart::Failed;
+                return fault_tx();
             }
             if (irq_high || sx1262_carrier_busy(raw_rssi, config.lbt_threshold_dbm)) {
                 return RadioStart::Busy;
@@ -574,8 +600,15 @@ struct Sx1262Radio::Impl {
     }
 
     RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) noexcept {
+        const auto t0 = Clock::now();
+        const RadioStart result = try_start_transmit_untimed(data, size);
+        last_tx_start_us = elapsed_us(t0);
+        return result;
+    }
+
+    RadioStart try_start_transmit_untimed(const std::uint8_t* data, std::size_t size) noexcept {
         if (!ready() || !data || size == 0U || size > kMaxRadioPacket) {
-            return RadioStart::Failed;
+            return RadioStart::Failed; // caller error / already faulted: no new latch
         }
         if (transmitting) {
             return RadioStart::Busy;
@@ -584,7 +617,7 @@ struct Sx1262Radio::Impl {
         bool irq_high = false;
         std::uint16_t irq = 0U;
         if (!gpio_get(irq_descriptor, irq_high) || !read_irq(irq)) {
-            return RadioStart::Failed;
+            return fault_tx();
         }
         if (rx_in_progress(irq) || (irq & kIrqRxDone) != 0U) {
             return RadioStart::Busy;
@@ -597,16 +630,16 @@ struct Sx1262Radio::Impl {
             return sensed;
         }
 
-        const std::uint8_t standby[]{kStandbyRc};
+        const std::uint8_t standby[]{kStandbyXosc};
         if (!write_command(kSetStandby, standby, sizeof(standby)) || !set_packet_params(size)) {
-            return RadioStart::Failed;
+            return fault_tx();
         }
         std::array<std::uint8_t, kMaxRadioPacket + 1U> buffer{};
         buffer[0] = 0U;
         std::copy_n(data, size, buffer.begin() + 1);
         if (!write_command(kWriteBuffer, buffer.data(), size + 1U) || !clear_irq() ||
             !set_irq_mask(kTransmitIrqs)) {
-            return RadioStart::Failed;
+            return fault_tx();
         }
         const std::uint8_t timeout[]{
             static_cast<std::uint8_t>(kTxTimeoutUnits >> 16U),
@@ -614,14 +647,17 @@ struct Sx1262Radio::Impl {
             static_cast<std::uint8_t>(kTxTimeoutUnits),
         };
         if (!write_command(kSetTx, timeout, sizeof(timeout))) {
-            return RadioStart::Failed;
+            return fault_tx();
         }
         transmitting = true;
         rx_in_progress_since_valid = false;
         return RadioStart::Started;
     }
 
-    RadioPoll failed() noexcept { return {RadioEvent::Failed, 0U, 0}; }
+    RadioPoll failed() noexcept {
+        faulted = true;
+        return {RadioEvent::Failed, 0U, 0};
+    }
 
     RadioPoll poll(std::uint8_t* destination, std::size_t destination_capacity) noexcept {
         if (!ready() || !destination || destination_capacity == 0U) {
@@ -642,8 +678,10 @@ struct Sx1262Radio::Impl {
         if ((irq & kIrqTimeout) != 0U && transmitting) {
             // TX timed out: report it and go back to receive so the radio
             // does not stay wedged in "transmitting".
-            static_cast<void>(clear_irq(irq) && start_receive());
-            return failed();
+            if (!clear_irq(irq) || !start_receive()) {
+                return failed(); // cannot re-arm: latch fault
+            }
+            return {RadioEvent::Failed, 0U, 0};
         }
         if ((irq & kIrqTimeout) != 0U) {
             if (!clear_irq(irq) || !start_receive()) {
@@ -723,6 +761,9 @@ struct Sx1262Radio::Impl {
     bool antenna_switch_enabled{false};
     bool transmitting{false};
     bool initialized{false};
+    bool faulted{false};
+    std::uint32_t last_tx_start_us{0};
+    std::uint32_t last_rx_rearm_us{0};
     bool closed{false};
     bool rx_in_progress_since_valid{false};
     Clock::time_point rx_in_progress_since{};
@@ -735,6 +776,14 @@ Sx1262Radio::~Sx1262Radio() = default;
 
 RadioInitError Sx1262Radio::init_error() const noexcept {
     return impl_ ? impl_->init_error : RadioInitError::ConfigFailed;
+}
+
+std::uint32_t Sx1262Radio::last_tx_start_us() const noexcept {
+    return impl_ ? impl_->last_tx_start_us : 0U;
+}
+
+std::uint32_t Sx1262Radio::last_rx_rearm_us() const noexcept {
+    return impl_ ? impl_->last_rx_rearm_us : 0U;
 }
 
 bool Sx1262Radio::ready() const { return impl_ && impl_->ready(); }
