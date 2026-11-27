@@ -583,6 +583,19 @@ struct Sx1262Radio::Impl {
     // carrier_sense_ms. Any sample at or above the threshold, or any sign of a
     // packet in progress, means Busy. The radio is in continuous RX here.
     RadioStart carrier_sense() noexcept {
+        // RSSI right after SetRx is stale: wait until it settles, watching the
+        // IRQ line, then run the full carrier_sense_ms window of valid samples.
+        while (sx1262_cs_settle_wait_us(elapsed_us(rearm_end)) > 0U) {
+            bool irq_high = false;
+            if (!gpio_get(irq_descriptor, irq_high)) {
+                return fault_tx();
+            }
+            if (irq_high) {
+                return busy(BusyReason::CarrierIrq, 0U, 0, 0U);
+            }
+            std::this_thread::sleep_for(std::chrono::microseconds(
+                std::min<std::uint32_t>(sx1262_cs_settle_wait_us(elapsed_us(rearm_end)), 200U)));
+        }
         const auto end = Clock::now() + std::chrono::milliseconds(config.carrier_sense_ms);
         std::uint32_t sample_index = 0U;
         for (;;) {

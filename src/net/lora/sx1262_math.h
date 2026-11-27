@@ -45,4 +45,13 @@ constexpr bool sx1262_lbt_config_valid(std::uint32_t carrier_sense_ms,
     return carrier_sense_ms >= 5U && lbt_threshold_dbm <= -80;
 }
 
+// GetRssiInst reads a stale value (the previous packet's AGC level) for a
+// short time after SetRx; samples are only valid this long after re-arm.
+inline constexpr std::uint32_t kRssiSettleUs = 1000U;
+
+// Remaining wait before carrier-sense RSSI samples are valid; 0 when settled.
+constexpr std::uint32_t sx1262_cs_settle_wait_us(std::uint32_t us_since_rearm) {
+    return us_since_rearm >= kRssiSettleUs ? 0U : kRssiSettleUs - us_since_rearm;
+}
+
 } // namespace battleship::net::lora

@@ -43,3 +43,10 @@ TEST(Sx1262Math, LbtConfigLimits) {
     EXPECT_FALSE(sx1262_lbt_config_valid(5, -79));
     EXPECT_FALSE(sx1262_lbt_config_valid(0, -90));
 }
+
+TEST(Sx1262Math, CarrierSenseSettleWait) {
+    EXPECT_EQ(sx1262_cs_settle_wait_us(0), 1000U);
+    EXPECT_EQ(sx1262_cs_settle_wait_us(80), 920U);
+    EXPECT_EQ(sx1262_cs_settle_wait_us(1000), 0U);
+    EXPECT_EQ(sx1262_cs_settle_wait_us(5000), 0U);
+}
