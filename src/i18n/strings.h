@@ -163,13 +163,21 @@ enum class StrId {
     NetTransportTitle,             ///< "Connection Type" screen title
     NetTransportBle,               ///< "Bluetooth (BLE)" -- default, top row
     NetTransportWifi,              ///< "WiFi (LAN)"
-    NetTransportLora,              ///< "LoRa" -- disabled until Phase 8
+    NetTransportLora,              ///< "LoRa" (Phase 8; selectable on every build)
     NetTransportDeviceOnly,        ///< " (device only)" suffix when BATTLESHIP_BLE=0
     NetTransportMethodLine,        ///< "Method: %s" hint on the Host/Join menu
     NetLobbyAdvertisingAs,         ///< "Advertising as %s ..." (BLE host lobby)
     NetLobbyConnectingToBle,       ///< "Connecting to %s ..." (BLE join, no port)
     NetJoinScanningBle,            ///< "Scanning for nearby hosts..." (BLE join)
     NetBleUnavailable,             ///< "Bluetooth unavailable" (adapter/bluetoothd missing)
+
+    // ---- LoRa (Phase 8, Cap LoRa-1262 / desktop radio simulator) ----
+    NetLoraHostingAs,              ///< "Recruiting over LoRa as %s ..." (LoRa host lobby)
+    NetJoinScanningLora,           ///< "Listening for LoRa hosts..." (LoRa join)
+    NetLoraCapMissing,             ///< Cap not detected (I/O expander / SX1262 silent)
+    NetLoraUnavailable,            ///< any other radio start / link failure
+    NetLoraAntennaQuestion,        ///< one-time antenna-attached confirmation
+    NetLoraAntennaConfirm,         ///< "Enter: Yes   Esc: Back" key hint
 
     // ---- Net battle status ----
     NetYou,                        ///< "You" (shot-source label)

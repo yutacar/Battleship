@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 using i18n::Lang;
 
@@ -38,6 +39,7 @@ protected:
 
         i18n::set_language(Lang::EN);  // known baseline before each test
         i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
+        i18n::set_antenna_confirmed(false);
     }
 
     void TearDown() override {
@@ -49,6 +51,7 @@ protected:
         }
         i18n::set_language(Lang::EN);  // don't leak state into other test files
         i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
+        i18n::set_antenna_confirmed(false);
     }
 
     std::filesystem::path scratch_dir_;
@@ -142,4 +145,63 @@ TEST_F(I18nSettingsTest, LoadSettingsIgnoresUnknownTransportValue) {
 
     i18n::load_settings();
     EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Ble);  // default kept
+}
+
+// ---- Phase 8: LoRa transport preference + antenna confirmation ----
+
+TEST_F(I18nSettingsTest, LoraPrefRoundTrips) {
+    i18n::save_net_transport_pref(i18n::NetTransportPref::Lora);
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);
+
+    i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
+    i18n::load_settings();
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);
+
+    std::ifstream file(i18n::settings_file_path());
+    std::stringstream contents;
+    contents << file.rdbuf();
+    EXPECT_NE(contents.str().find("transport=lora\n"), std::string::npos) << contents.str();
+}
+
+TEST_F(I18nSettingsTest, AntennaConfirmedDefaultsToFalse) {
+    i18n::load_settings();
+    EXPECT_FALSE(i18n::antenna_confirmed());
+}
+
+TEST_F(I18nSettingsTest, AntennaConfirmedPersists) {
+    i18n::save_antenna_confirmed(true);
+    EXPECT_TRUE(i18n::antenna_confirmed());  // applied live
+
+    i18n::set_antenna_confirmed(false);
+    i18n::load_settings();
+    EXPECT_TRUE(i18n::antenna_confirmed());
+}
+
+TEST_F(I18nSettingsTest, AntennaConfirmedSurvivesOtherSaves) {
+    // Every save_*() rewrites the whole file; the antenna flag must not be
+    // dropped by a later language or transport save (and vice versa).
+    i18n::save_antenna_confirmed(true);
+    i18n::save_language(Lang::ZH);
+    i18n::save_net_transport_pref(i18n::NetTransportPref::Lora);
+
+    i18n::set_antenna_confirmed(false);
+    i18n::set_language(Lang::EN);
+    i18n::set_net_transport_pref(i18n::NetTransportPref::Ble);
+    i18n::load_settings();
+    EXPECT_TRUE(i18n::antenna_confirmed());
+    EXPECT_EQ(i18n::current_language(), Lang::ZH);
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Lora);
+}
+
+TEST_F(I18nSettingsTest, UnknownTransportKeyFallsBackToBle) {
+    const auto dir = std::filesystem::path(i18n::settings_file_path()).parent_path();
+    std::filesystem::create_directories(dir);
+    std::ofstream file(i18n::settings_file_path());
+    file << "transport=LoRa\n";  // keys are case-sensitive: not "lora"
+    file << "antenna_confirmed=maybe\n";
+    file.close();
+
+    i18n::load_settings();
+    EXPECT_EQ(i18n::net_transport_pref(), i18n::NetTransportPref::Ble);
+    EXPECT_FALSE(i18n::antenna_confirmed());
 }

@@ -47,6 +47,7 @@ constexpr TemplateArity kTemplates[] = {
     {StrId::ResultTotalTurns, 1},
     {StrId::NetLobbyYourAddress, 2},
     {StrId::NetLobbyConnectingTo, 2},
+    {StrId::NetLoraHostingAs, 1},
     {StrId::BattleStatsLine, 4},
     {StrId::BattleStatsSunkLine, 2},
     {StrId::KeyGuidePlacementMove, 1},
@@ -152,4 +153,27 @@ TEST(I18nCatalog, SetLanguageSwitchesActiveTable) {
     EXPECT_STREQ(i18n::tr(StrId::MenuOnePlayer), "单人对战");
 
     i18n::set_language(Lang::EN);  // restore default for subsequent tests
+}
+
+TEST(I18nCatalog, LoraStringsDefinedInEveryLanguage) {
+    // Phase 8 (LoRa): explicit guard on top of the exhaustive non-empty
+    // check, so a LoRa entry accidentally left as a placeholder (or with a
+    // stray "Coming soon" marker) is caught by name.
+    constexpr StrId kLoraIds[] = {
+        StrId::NetTransportLora,   StrId::NetLoraHostingAs,      StrId::NetJoinScanningLora,
+        StrId::NetLoraCapMissing,  StrId::NetLoraUnavailable,    StrId::NetLoraAntennaQuestion,
+        StrId::NetLoraAntennaConfirm,
+    };
+    for (Lang lang : kAllLangs) {
+        i18n::set_language(lang);
+        for (StrId id : kLoraIds) {
+            const char* text = i18n::tr(id);
+            ASSERT_NE(text, nullptr);
+            EXPECT_GT(std::strlen(text), 0u) << "lang=" << static_cast<int>(lang) << " id=" << static_cast<int>(id);
+            EXPECT_EQ(std::strstr(text, "Coming soon"), nullptr) << text;
+        }
+    }
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetLoraUnavailable), "LoRa radio could not start.");
+    EXPECT_EQ(i18n::trf(StrId::NetLoraHostingAs, "BSHIP-abc"), "Recruiting over LoRa as BSHIP-abc ...");
 }

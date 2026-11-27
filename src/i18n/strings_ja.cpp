@@ -127,6 +127,12 @@ const Table kJapaneseTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "%s に接続しています...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "近くのホストを検索しています...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "Bluetoothを利用できません";
+    t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "LoRa で募集中: %s ...";
+    t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "LoRa のホストを探しています...";
+    t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "Cap LoRa-1262 が見つかりません。電源を切って装着してから再試行してください。";
+    t[static_cast<std::size_t>(StrId::NetLoraUnavailable)] = "LoRa 無線を開始できませんでした。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaQuestion)] = "アンテナを取り付けましたか？付けずに送信すると Cap が壊れることがあります。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaConfirm)] = "Enter: はい   Esc: 戻る";
 
     t[static_cast<std::size_t>(StrId::NetYou)] = "自分";
     t[static_cast<std::size_t>(StrId::NetFoe)] = "相手";
