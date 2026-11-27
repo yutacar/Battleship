@@ -175,3 +175,13 @@ TEST(I18nCatalog, LoraStringsDefinedInEveryLanguage) {
     EXPECT_STREQ(i18n::tr(StrId::NetLoraUnavailable), "LoRa radio could not start.");
     EXPECT_EQ(i18n::trf(StrId::NetLoraHostingAs, "BSHIP-abc"), "Recruiting over LoRa as BSHIP-abc ...");
 }
+
+TEST(I18nCatalog, BleOffStringDefinedInEveryLanguage) {
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "Bluetooth is off. Turn it on in Settings.");
+    i18n::set_language(Lang::JA);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "Bluetoothがオフです。設定でオンにしてください");
+    i18n::set_language(Lang::ZH);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "蓝牙已关闭，请在设置中开启");
+    i18n::set_language(Lang::EN);
+}

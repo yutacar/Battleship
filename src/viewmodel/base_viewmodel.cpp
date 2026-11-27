@@ -978,9 +978,12 @@ void BaseViewModel::start_network_host() {
         net_ble_transport_ = std::make_unique<battleship::net::BleTransport>();
         const std::string host_name = battleship::net::local_host_name();
         if (!net_ble_transport_->start_host(host_name)) {
+            const bool off = net_ble_transport_->start_error() ==
+                             battleship::net::BleStartError::AdapterOff;
             net_ble_transport_.reset();
             net_flow_ble_ = false;
-            net_status_subject_.set(i18n::tr(i18n::StrId::NetBleUnavailable));
+            net_status_subject_.set(
+                i18n::tr(off ? i18n::StrId::NetBleOff : i18n::StrId::NetBleUnavailable));
             show_page(model::AppPage::NetError);
             return;
         }
@@ -1028,6 +1031,14 @@ void BaseViewModel::start_network_join() {
     {
         net_flow_ble_ = true;
         net_ble_scanning_ = net_ble_scanner_.start();
+        if (!net_ble_scanning_ &&
+            net_ble_scanner_.start_error() == battleship::net::BleStartError::AdapterOff) {
+            // User must turn Bluetooth on: same NetError page as the host flow.
+            net_flow_ble_ = false;
+            net_status_subject_.set(i18n::tr(i18n::StrId::NetBleOff));
+            show_page(model::AppPage::NetError);
+            return;
+        }
         net_hosts_signature_ = 0;
         net_status_subject_.set(i18n::tr(net_ble_scanning_ ? i18n::StrId::NetJoinScanningBle
                                                            : i18n::StrId::NetBleUnavailable));

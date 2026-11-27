@@ -115,6 +115,7 @@ const Table kEnglishTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "Connecting to %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "Scanning for nearby hosts...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "Bluetooth unavailable";
+    t[static_cast<std::size_t>(StrId::NetBleOff)] = "Bluetooth is off. Turn it on in Settings.";
     t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "Recruiting over LoRa as %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "Listening for LoRa hosts...";
     t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "Cap LoRa-1262 not found. Power off, attach it, then try again.";

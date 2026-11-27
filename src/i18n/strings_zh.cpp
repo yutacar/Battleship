@@ -114,6 +114,7 @@ const Table kChineseTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "正在连接 %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "正在扫描附近的主机...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "蓝牙不可用";
+    t[static_cast<std::size_t>(StrId::NetBleOff)] = "蓝牙已关闭，请在设置中开启";
     t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "正在通过 LoRa 招募: %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "正在搜索 LoRa 主机...";
     t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "未找到 Cap LoRa-1262。请关机安装后重试。";

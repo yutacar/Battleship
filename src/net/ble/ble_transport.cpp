@@ -96,13 +96,25 @@ std::string find_adapter(sd_bus* bus) {
     return adapter;
 }
 
-/// Blocking (setup-time only): best-effort Adapter1.Powered = true. A
-/// failure is not fatal here -- if the adapter really is unusable the
-/// subsequent register/discovery call fails and reports it.
-void power_on_adapter(sd_bus* bus, const std::string& adapter) {
+/// Blocking (setup-time only): tries Adapter1.Powered = true, then reads it
+/// back and returns the actual state. The set can fail (e.g. rfkill
+/// soft-block: bluetoothd logs "Failed to set mode: Failed (0x03)"), and BlueZ
+/// still ACCEPTS RegisterAdvertisement / StartDiscovery while the adapter is
+/// off, silently advertising/scanning nothing -- so callers must check the
+/// returned state instead of relying on the later calls to fail.
+bool power_on_adapter(sd_bus* bus, const std::string& adapter) {
     sd_bus_error error = SD_BUS_ERROR_NULL;
     sd_bus_set_property(bus, kBluez, adapter.c_str(), kAdapterIface, "Powered", &error, "b", 1);
     sd_bus_error_free(&error);
+
+    int powered = 0;
+    sd_bus_error get_error = SD_BUS_ERROR_NULL;
+    const int rc = sd_bus_get_property_trivial(bus, kBluez, adapter.c_str(), kAdapterIface,
+                                               "Powered", &get_error, 'b', &powered);
+    sd_bus_error_free(&get_error);
+    // If the property cannot be read, don't claim "off": let the normal
+    // register/discovery path decide.
+    return rc < 0 || powered != 0;
 }
 
 /// Reads an `ay` byte array out of `m` into `out`. Returns >= 0 on success.
@@ -255,6 +267,7 @@ BleScanner::~BleScanner() = default;
 
 bool BleScanner::start() {
     stop();
+    start_error_ = BleStartError::None;
     if (sd_bus_open_system(&impl_->bus) < 0) {
         impl_->bus = nullptr;
         return false;
@@ -262,9 +275,14 @@ bool BleScanner::start() {
     impl_->adapter = find_adapter(impl_->bus);
     if (impl_->adapter.empty()) {
         impl_->shutdown();
+        start_error_ = BleStartError::Other;
         return false;
     }
-    power_on_adapter(impl_->bus, impl_->adapter);
+    if (!power_on_adapter(impl_->bus, impl_->adapter)) {
+        impl_->shutdown();
+        start_error_ = BleStartError::AdapterOff;
+        return false;
+    }
 
     // LE-only discovery filter. Duplicates are fine (we re-enumerate the
     // device list rather than consuming per-advert events); filtering to LE
@@ -391,7 +409,7 @@ struct BleTransport::Impl {
         tx_char_path.clear();
         tx_value.clear();
         // recv_buffer intentionally kept: bytes already received stay
-        // drainable after close(), mirroring TcpTransport::close().
+        // drainable after close() (poll()/recv() still hand it out).
     }
 
     // ---------------- host: GATT server vtable handlers ----------------
@@ -721,6 +739,7 @@ BleTransport::~BleTransport() {
 
 bool BleTransport::start_host(const std::string& host_name) {
     close();
+    start_error_ = BleStartError::None;
     if (sd_bus_open_system(&impl_->bus) < 0) {
         impl_->bus = nullptr;
         return false;
@@ -728,9 +747,14 @@ bool BleTransport::start_host(const std::string& host_name) {
     impl_->adapter = find_adapter(impl_->bus);
     if (impl_->adapter.empty()) {
         impl_->shutdown();
+        start_error_ = BleStartError::Other;
         return false;
     }
-    power_on_adapter(impl_->bus, impl_->adapter);
+    if (!power_on_adapter(impl_->bus, impl_->adapter)) {
+        impl_->shutdown();
+        start_error_ = BleStartError::AdapterOff;
+        return false;
+    }
 
     impl_->role = Impl::Role::Host;
     impl_->local_name = std::string(kBleNamePrefix) + host_name;

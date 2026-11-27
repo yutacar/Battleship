@@ -115,6 +115,7 @@ const Table kJapaneseTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "%s に接続しています...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "近くのホストを検索しています...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "Bluetoothを利用できません";
+    t[static_cast<std::size_t>(StrId::NetBleOff)] = "Bluetoothがオフです。設定でオンにしてください";
     t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "LoRa で募集中: %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "LoRa のホストを探しています...";
     t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "Cap LoRa-1262 が見つかりません。電源を切って装着してから再試行してください。";

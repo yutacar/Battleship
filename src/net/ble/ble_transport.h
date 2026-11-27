@@ -77,6 +77,11 @@ struct BleScanResult {
     std::string name;         ///< advertised local name ("BSHIP-<host>")
 };
 
+/// Why a BleScanner::start()/BleTransport::start_host() call failed. Only
+/// AdapterOff gets its own UI message (user must turn Bluetooth on); every
+/// other failure is "unavailable".
+enum class BleStartError { None, AdapterOff, Other };
+
 /// Join side: LE discovery with a NUS/name filter, poll-driven host list
 /// (the BLE counterpart of the LoRa beacon scan).
 class BleScanner {
@@ -88,7 +93,8 @@ public:
 
     /// Connects to the system bus, powers the first BlueZ adapter and starts
     /// filtered LE discovery. Returns false if there is no usable adapter /
-    /// bluetoothd (UI then shows "Bluetooth unavailable").
+    /// bluetoothd (UI then shows "Bluetooth unavailable"), or if the adapter
+    /// stays powered off (start_error() == AdapterOff -> "Bluetooth is off").
     bool start();
 
     /// Re-enumerates discovered devices at a modest interval and services
@@ -97,12 +103,16 @@ public:
 
     [[nodiscard]] const std::vector<BleScanResult>& results() const;
 
+    /// Reason for the last start() failure (None after success).
+    [[nodiscard]] BleStartError start_error() const { return start_error_; }
+
     /// Stops discovery and releases the bus connection. Idempotent.
     void stop();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    BleStartError start_error_ = BleStartError::None;
 };
 
 /// BLE ITransport. One instance handles either role:
@@ -122,7 +132,13 @@ public:
     /// adapter, no bluetoothd, D-Bus permission denied -- see NOTES.md Phase
     /// 6 for the bluetooth-group requirement). On success state() ==
     /// Connecting until a central subscribes to the TX characteristic.
+    /// Also returns false (start_error() == AdapterOff) when the adapter is
+    /// still powered off after a power-on attempt (e.g. rfkill soft-block):
+    /// BlueZ would otherwise accept the advertisement and advertise nothing.
     bool start_host(const std::string& host_name);
+
+    /// Reason for the last start_host() failure (None after success).
+    [[nodiscard]] BleStartError start_error() const { return start_error_; }
 
     /// Join side: connect to a device previously found by BleScanner.
     /// `device_path` is BleScanResult::device_path. Returns false on
@@ -140,6 +156,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    BleStartError start_error_ = BleStartError::None;
 };
 
 }  // namespace battleship::net

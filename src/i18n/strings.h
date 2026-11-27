@@ -156,6 +156,7 @@ enum class StrId {
     NetLobbyConnectingToBle,       ///< "Connecting to %s ..." (BLE join, no port)
     NetJoinScanningBle,            ///< "Scanning for nearby hosts..." (BLE join)
     NetBleUnavailable,             ///< "Bluetooth unavailable" (adapter/bluetoothd missing)
+    NetBleOff,                     ///< "Bluetooth is off. Turn it on in Settings." (adapter powered off)
 
     // ---- LoRa (Phase 8, Cap LoRa-1262 / desktop radio simulator) ----
     NetLoraHostingAs,              ///< "Recruiting over LoRa as %s ..." (LoRa host lobby)
