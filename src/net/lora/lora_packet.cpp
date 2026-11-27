@@ -10,8 +10,6 @@
 
 namespace battleship::net::lora {
 
-IRadio::~IRadio() = default;
-
 namespace {
 
 constexpr std::size_t kHeaderLen = 5;

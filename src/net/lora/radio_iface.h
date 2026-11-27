@@ -38,7 +38,7 @@ enum class RadioInitError {
 // returns to receive mode on its own. Reception is always on otherwise.
 class IRadio {
 public:
-    virtual ~IRadio();
+    virtual ~IRadio() = default;
     virtual bool ready() const = 0;
     virtual RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) = 0;
     virtual RadioPoll poll(std::uint8_t* dst, std::size_t cap) = 0;

@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <random>
 #include <utility>
@@ -25,6 +26,13 @@ struct FakeBusConfig {
 };
 
 class FakeRadioBus;
+
+// Test hook: one entry per transmission that was started on the bus.
+struct TxRecord {
+    const IRadio* radio = nullptr;
+    std::uint64_t start_ms = 0;
+    std::vector<std::uint8_t> bytes;
+};
 
 // Half duplex: a packet is heard only by radios that were not transmitting
 // when it started. There is no cross-radio carrier sense (hidden terminals);
@@ -54,7 +62,7 @@ private:
     std::int16_t rssi_;
     bool ready_ = true;
     bool tx_pending_ = false; // transmitting, delivery not yet done
-    bool tx_done_ = false;    // TxDone not yet polled
+    int tx_done_ = 0;         // TxDone events not yet polled
     Tx tx_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> tx_history_;
     std::deque<Rx> rx_;
@@ -70,6 +78,13 @@ public:
     void inject_foreign(const std::vector<std::uint8_t>& bytes);
     void set_channel_busy(bool busy) { busy_ = busy; }
 
+    // Test hooks. tx_log() lists every transmission in start order.
+    // set_drop_filter(): when it returns true for a transmission's bytes,
+    // that whole transmission is delivered to nobody (once per transmission,
+    // evaluated at delivery time). Pass nullptr to clear.
+    const std::vector<TxRecord>& tx_log() const { return tx_log_; }
+    void set_drop_filter(std::function<bool(const std::vector<std::uint8_t>&)> f) { drop_filter_ = std::move(f); }
+
 private:
     friend class FakeRadio;
     bool lost();
@@ -79,6 +94,8 @@ private:
     std::mt19937 rng_;
     std::uint64_t now_ = 0;
     bool busy_ = false;
+    std::vector<TxRecord> tx_log_;
+    std::function<bool(const std::vector<std::uint8_t>&)> drop_filter_;
     std::vector<std::unique_ptr<FakeRadio>> radios_;
 };
 

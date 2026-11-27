@@ -24,14 +24,15 @@ RadioStart FakeRadio::try_start_transmit(const std::uint8_t* data, std::size_t s
     tx_.end = bus_.now_ + (bus_.cfg_.use_airtime ? bus_.policy_.airtime_ms(size) : 0);
     tx_history_.emplace_back(tx_.start, tx_.end);
     tx_pending_ = true;
+    bus_.tx_log_.push_back({this, tx_.start, tx_.bytes});
     return RadioStart::Started;
 }
 
 RadioPoll FakeRadio::poll(std::uint8_t* dst, std::size_t cap) {
     RadioPoll r;
     if (!ready_) return r;
-    if (tx_done_) {
-        tx_done_ = false;
+    if (tx_done_ > 0) {
+        --tx_done_;
         r.event = RadioEvent::TxDone;
         return r;
     }
@@ -50,7 +51,7 @@ RadioPoll FakeRadio::poll(std::uint8_t* dst, std::size_t cap) {
 void FakeRadio::shutdown() {
     ready_ = false;
     tx_pending_ = false;
-    tx_done_ = false;
+    tx_done_ = 0;
     rx_.clear();
 }
 
@@ -78,7 +79,8 @@ void FakeRadioBus::advance_to(std::uint64_t now_ms) {
         }
         if (!next) break;
         next->tx_pending_ = false;
-        next->tx_done_ = true;
+        ++next->tx_done_;
+        if (drop_filter_ && drop_filter_(next->tx_.bytes)) continue;
         const std::uint64_t start = next->tx_.start;
         for (auto& rx : radios_) {
             if (rx.get() == next || !rx->ready_) continue;
