@@ -618,6 +618,9 @@ file(GLOB_RECURSE BATTLESHIP_NET_SOURCES CONFIGURE_DEPENDS
 # glob and add it back explicitly below, so a macOS/Windows desktop build
 # never even attempts to compile it (PLAN.md Phase 6 "CMake で Linux のみに隔離").
 list(FILTER BATTLESHIP_NET_SOURCES EXCLUDE REGEX "/src/net/ble/")
+# src/net/lora/sx1262_radio.cpp needs Linux spidev/GPIO/i2c-dev kernel headers:
+# added back below only when BATTLESHIP_LORA_HW is ON.
+list(FILTER BATTLESHIP_NET_SOURCES EXCLUDE REGEX "/src/net/lora/sx1262_radio\\.cpp$")
 
 add_library(battleship_net STATIC
     ${BATTLESHIP_NET_SOURCES}
@@ -643,6 +646,17 @@ target_compile_definitions(battleship_net
         BATTLESHIP_BLE=$<BOOL:${BATTLESHIP_BLE}>
         BATTLESHIP_LORA_HW=$<BOOL:${BATTLESHIP_LORA_HW}>
 )
+
+if(BATTLESHIP_LORA_HW)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "BATTLESHIP_LORA_HW=ON requires a Linux target (spidev/GPIO/i2c-dev). "
+            "Reconfigure with -DBATTLESHIP_LORA_HW=OFF for this platform.")
+    endif()
+    target_sources(battleship_net PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/net/lora/sx1262_radio.cpp"
+    )
+endif()
 
 if(BATTLESHIP_BLE)
     target_sources(battleship_net PRIVATE
