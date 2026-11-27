@@ -71,17 +71,20 @@ std::size_t LoRaLink::take_received(std::vector<std::uint8_t>& out) {
     return n;
 }
 
-void LoRaLink::close(std::uint64_t) {
+void LoRaLink::close(std::uint64_t now_ms) {
     if (state_ == LinkState::Connected) {
-        // Pending DATA is pointless now; keep only control packets.
-        drop_queued(PacketType::Data);
+        // Nothing but the BYE may be transmitted from now on.
+        tx_queue_.clear();
         Packet p;
         p.type = PacketType::Bye;
         p.session_id = session_id_;
         enqueue(p);
-    } else {
-        tx_queue_.clear();
+        bye_deadline_ms_ = now_ms + timing_.bye_window_ms;
+        state_ = LinkState::Closed;
+        pump_tx(now_ms);
+        return;
     }
+    tx_queue_.clear();
     state_ = LinkState::Closed;
 }
 
@@ -176,6 +179,10 @@ void LoRaLink::pump_tx(std::uint64_t now_ms) {
         return;
     }
     if (d.status != TxDecisionStatus::Allowed) {
+        if (state_ == LinkState::Closed) {
+            tx_queue_.clear(); // BYE is best effort
+            return;
+        }
         // Policy locked/invalid: nothing may be transmitted any more.
         tx_queue_.clear();
         state_ = LinkState::Failed;
@@ -192,12 +199,13 @@ void LoRaLink::pump_tx(std::uint64_t now_ms) {
         break;
     case RadioStart::Failed:
         tx_queue_.clear();
-        state_ = LinkState::Failed;
+        if (state_ != LinkState::Closed) state_ = LinkState::Failed;
         break;
     }
 }
 
 void LoRaLink::poll(std::uint64_t now_ms) {
+    if (state_ == LinkState::Closed && now_ms >= bye_deadline_ms_) tx_queue_.clear();
     if (!radio_.ready()) {
         if (state_ != LinkState::Closed) state_ = LinkState::Failed;
         return;

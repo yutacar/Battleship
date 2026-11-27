@@ -40,6 +40,7 @@ struct LinkTiming {
     std::uint32_t lbt_backoff_min_ms = 10;
     std::uint32_t lbt_backoff_max_ms = 60;
     std::size_t tx_queue_limit = 16;
+    std::uint32_t bye_window_ms = 500; // how long a pending BYE is retried after close()
 };
 
 class LoRaLink {
@@ -62,7 +63,12 @@ public:
     bool send_data(const std::uint8_t* data, std::size_t len);
     // Appends all received DATA bytes to out and returns the byte count.
     std::size_t take_received(std::vector<std::uint8_t>& out);
-    // Connected: tries to send one BYE. Then Closed.
+    // State becomes Closed immediately. From Connected, one BYE is attempted
+    // during this very call (pump_tx at now_ms). If that attempt cannot start
+    // (channel busy, policy deferral, a transmission still in flight) it is
+    // retried by poll() for at most timing.bye_window_ms, then dropped
+    // silently (the peer's own timeout covers a lost BYE). No other packet is
+    // transmitted after close(), and Closed never turns into Failed.
     void close(std::uint64_t now_ms);
 
 private:
@@ -94,6 +100,7 @@ private:
     std::uint64_t next_tx_ms_ = 0;
     std::uint64_t next_beacon_ms_ = 0;
     std::uint64_t next_join_ms_ = 0;
+    std::uint64_t bye_deadline_ms_ = 0;
     int join_attempts_ = 0;
     std::vector<std::uint8_t> rx_data_;
 };

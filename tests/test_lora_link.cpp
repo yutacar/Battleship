@@ -245,12 +245,13 @@ TEST(LoraLink, ForeignPacketsAreIgnored) {
     host.link.start_host("HOST", 0);
     client.link.start_scan(0);
     bool joined = false;
-    std::uint64_t t = 0;
     std::vector<std::uint8_t> got;
     int injected = 0;
-    const auto d = payload13(3);
-    bool sent = false;
-    for (; t < 20000; t += kStep) {
+    int sent = 0;
+    std::size_t expected = 0;
+    // Junk keeps flowing (one packet per 25 ms) for the whole run, through
+    // scanning, joining and data exchange.
+    for (std::uint64_t t = 0; t < 25000 || injected < 500; t += kStep) {
         if (injected < 500 && t % 25 == 0) {
             std::vector<std::uint8_t> junk(1 + rng() % 40);
             for (auto& x : junk) x = static_cast<std::uint8_t>(rng());
@@ -263,16 +264,20 @@ TEST(LoraLink, ForeignPacketsAreIgnored) {
         if (!joined && !client.link.peers().empty()) {
             joined = client.link.join(client.link.peers()[0].session_id, t);
         }
-        if (!sent && client.link.state() == LinkState::Connected &&
-            host.link.state() == LinkState::Connected) {
+        if (client.link.state() == LinkState::Connected && host.link.state() == LinkState::Connected &&
+            t % 500 == 0 && sent < 20) {
+            const auto d = payload13(static_cast<std::uint8_t>(sent));
             ASSERT_TRUE(host.link.send_data(d.data(), d.size()));
-            sent = true;
+            expected += d.size();
+            ++sent;
         }
         client.link.take_received(got);
-        if (!got.empty()) break;
     }
-    EXPECT_EQ(got, d);
+    EXPECT_EQ(injected, 500);
+    EXPECT_EQ(sent, 20);
+    EXPECT_EQ(got.size(), expected);
     EXPECT_EQ(host.link.state(), LinkState::Connected);
+    EXPECT_EQ(client.link.state(), LinkState::Connected);
 }
 
 TEST(LoraLink, CarrierBusyBacksOff) {
@@ -339,4 +344,40 @@ TEST(LoraLink, JoinGivesUpWhenNoHost) {
     run(bus, {&client.link}, 4505, 6000);
     EXPECT_EQ(client.link.state(), LinkState::Failed);
     EXPECT_EQ(count_type(bus, PacketType::Join), 5);
+}
+
+TEST(LoraLink, CloseSendsByeDuringCall) {
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    // Let the link go quiet so policy/gap do not defer the BYE.
+    run(bus, {&host.link, &client.link}, t + kStep, t + 1000);
+    t += 1000;
+    ASSERT_EQ(count_type(bus, PacketType::Bye), 0);
+    client.link.close(t);
+    EXPECT_EQ(client.link.state(), LinkState::Closed);
+    EXPECT_EQ(count_type(bus, PacketType::Bye, &client.radio), 1); // already sent inside close()
+    run(bus, {&host.link, &client.link}, t + kStep, t + 2000);
+    EXPECT_EQ(count_type(bus, PacketType::Bye, &client.radio), 1);
+    EXPECT_EQ(host.link.state(), LinkState::Closed);
+}
+
+TEST(LoraLink, PendingByeIsDroppedAfterWindow) {
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    run(bus, {&host.link, &client.link}, t + kStep, t + 1000);
+    t += 1000;
+    const std::size_t before = bus.tx_log().size();
+    bus.set_channel_busy(true);
+    client.link.close(t);
+    run(bus, {&host.link, &client.link}, t + kStep, t + 1000); // past the 500 ms window
+    EXPECT_EQ(bus.tx_log().size(), before);
+    EXPECT_EQ(client.link.state(), LinkState::Closed);
+    bus.set_channel_busy(false);
+    run(bus, {&host.link, &client.link}, t + 1005, t + 3000);
+    EXPECT_EQ(bus.tx_log().size(), before); // no late BYE, nothing else either
+    EXPECT_EQ(client.link.state(), LinkState::Closed);
 }
