@@ -34,9 +34,13 @@ add_executable(battleship_core_tests
     test_net_session.cpp
     test_net_tcp.cpp
     test_lora_policy.cpp
+    test_lora_packet.cpp
+    support/fake_radio_bus.cpp
     test_i18n_catalog.cpp
     test_i18n_settings.cpp
 )
+
+target_include_directories(battleship_core_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 target_link_libraries(battleship_core_tests
     PRIVATE
