@@ -656,6 +656,11 @@ if(BATTLESHIP_LORA_HW)
     target_sources(battleship_net PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/net/lora/sx1262_radio.cpp"
     )
+
+    # Hardware bring-up CLI (Task 7). Deliberately has no install() rule so it
+    # never ends up in the .deb; push it to the device by hand.
+    add_executable(battleship_lora_probe tools/lora_probe.cpp)
+    target_link_libraries(battleship_lora_probe PRIVATE battleship_net)
 endif()
 
 if(BATTLESHIP_BLE)

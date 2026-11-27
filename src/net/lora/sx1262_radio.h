@@ -52,6 +52,9 @@ public:
     std::uint32_t last_tx_start_us() const noexcept;
     std::uint32_t last_rx_rearm_us() const noexcept;
 
+    // Diagnostics (lora_probe): SX1262 ReadRegister (0x1D).
+    bool read_register(std::uint16_t addr, std::uint8_t* out, std::size_t n);
+
     bool ready() const override;
     RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) override;
     RadioPoll poll(std::uint8_t* dst, std::size_t cap) override;

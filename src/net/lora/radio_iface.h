@@ -21,6 +21,7 @@ struct RadioPoll {
     RadioEvent event = RadioEvent::Idle;
     std::size_t size = 0;
     std::int16_t rssi_dbm = 0;
+    std::int8_t snr_quarter_db = 0; // packet SNR in 0.25 dB units (diagnostics)
 };
 
 enum class RadioInitError {

@@ -161,7 +161,8 @@ bool Sx1262Config::valid() const noexcept {
     return !spi_device.empty() && !gpio_chip.empty() && !i2c_device.empty() &&
            spi_speed_hz > 0U && spi_speed_hz <= 10'000'000U && reset_gpio != irq_gpio &&
            reset_gpio != busy_gpio && irq_gpio != busy_gpio && lbt_threshold_dbm >= -127 &&
-           lbt_threshold_dbm <= -20 && carrier_sense_ms >= 1U && carrier_sense_ms <= 100U &&
+           lbt_threshold_dbm <= -20 && carrier_sense_ms <= 100U &&
+           sx1262_lbt_config_valid(carrier_sense_ms, lbt_threshold_dbm) &&
            profile.valid() && profile.transmit_power_dbm <= kMaxTxPowerDbm;
 }
 
@@ -727,7 +728,8 @@ struct Sx1262Radio::Impl {
             !clear_irq(irq) || !start_receive()) {
             return failed();
         }
-        return {RadioEvent::Received, payload_size, rssi};
+        return {RadioEvent::Received, payload_size, rssi,
+                static_cast<std::int8_t>(packet_status[1])};
     }
 
     void shutdown() noexcept {
@@ -784,6 +786,10 @@ std::uint32_t Sx1262Radio::last_tx_start_us() const noexcept {
 
 std::uint32_t Sx1262Radio::last_rx_rearm_us() const noexcept {
     return impl_ ? impl_->last_rx_rearm_us : 0U;
+}
+
+bool Sx1262Radio::read_register(std::uint16_t addr, std::uint8_t* out, std::size_t n) {
+    return impl_ && out != nullptr && n > 0U && impl_->read_register(addr, out, n);
 }
 
 bool Sx1262Radio::ready() const { return impl_ && impl_->ready(); }

@@ -38,4 +38,11 @@ constexpr std::uint32_t sx1262_frequency_word(std::uint32_t frequency_hz) {
                                       32'000'000ULL);
 }
 
+// ARIB STD-T108 listen-before-talk limits for Sx1262Config::valid():
+// carrier sense of at least 5 ms, threshold no higher than -80 dBm.
+constexpr bool sx1262_lbt_config_valid(std::uint32_t carrier_sense_ms,
+                                       std::int16_t lbt_threshold_dbm) {
+    return carrier_sense_ms >= 5U && lbt_threshold_dbm <= -80;
+}
+
 } // namespace battleship::net::lora

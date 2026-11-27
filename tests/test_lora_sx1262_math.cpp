@@ -35,3 +35,11 @@ TEST(Sx1262Math, FrequencyWord) {
     EXPECT_EQ(sx1262_frequency_word(921'800'000U), 966577356U);
     EXPECT_EQ(sx1262_frequency_word(915'000'000U), 959'447'040U);
 }
+
+TEST(Sx1262Math, LbtConfigLimits) {
+    EXPECT_TRUE(sx1262_lbt_config_valid(5, -90));
+    EXPECT_TRUE(sx1262_lbt_config_valid(5, -80));
+    EXPECT_FALSE(sx1262_lbt_config_valid(4, -90));
+    EXPECT_FALSE(sx1262_lbt_config_valid(5, -79));
+    EXPECT_FALSE(sx1262_lbt_config_valid(0, -90));
+}
