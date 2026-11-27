@@ -125,6 +125,39 @@ TEST_F(LoraCapPower, AcquireFailsWithoutFile) {
     EXPECT_FALSE(fs::exists(brightness_));
 }
 
+TEST_F(LoraCapPower, FailedPowerOffKeepsMarkerAndOwnership) {
+    write_all(brightness_, "0\n");
+    CapPower power(brightness_.string(), dir_.string(), 0);
+    ASSERT_TRUE(power.acquire());
+    ASSERT_TRUE(power.owned());
+
+    // Make the brightness file read-only so the power-off write fails.
+    fs::permissions(brightness_, fs::perms::owner_read, fs::perm_options::replace);
+    {
+        std::ofstream probe(brightness_, std::ios::app);
+        if (probe) {
+            // Writable anyway (e.g. running as root): the failure path cannot be exercised.
+            fs::permissions(brightness_,
+                            fs::perms::owner_read | fs::perms::owner_write,
+                            fs::perm_options::replace);
+            GTEST_SKIP() << "brightness file stays writable; cannot simulate write failure";
+        }
+    }
+
+    power.release();
+    EXPECT_TRUE(power.owned());
+    EXPECT_TRUE(fs::exists(marker_));
+
+    // Restore write access; a retry must now power off and clear the marker.
+    fs::permissions(brightness_,
+                    fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+    power.release();
+    EXPECT_FALSE(power.owned());
+    EXPECT_FALSE(fs::exists(marker_));
+    EXPECT_EQ(read_all(brightness_).substr(0, 1), "0");
+}
+
 TEST_F(LoraCapPower, DestructorReleases) {
     write_all(brightness_, "0\n");
     {

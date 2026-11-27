@@ -81,7 +81,10 @@ bool CapPower::acquire() {
 
 void CapPower::release() {
     if (!owned_) return;
-    write_state(brightness_path_, '0');
+    // If the power-off write fails, keep the marker and ownership so a later
+    // release() (or the destructor) can retry. The marker is the only record
+    // that the power is ours across restarts.
+    if (!write_state(brightness_path_, '0')) return;
     std::error_code ec;
     fs::remove(marker_path_, ec);
     owned_ = false;
