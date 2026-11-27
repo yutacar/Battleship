@@ -40,6 +40,12 @@ RadioPoll FakeRadio::poll(std::uint8_t* dst, std::size_t cap) {
     if (!ready_) return r;
     if (tx_done_ > 0) {
         --tx_done_;
+        if (tx_done_ == 0 && deaf_) {
+            // RX re-armed now: the deaf window (emission end -> this poll)
+            // also covers packets that started inside it but end after it.
+            deaf_ = false;
+            if (!tx_history_.empty()) tx_history_.back().second = std::max(tx_history_.back().second, bus_.now_);
+        }
         r.event = RadioEvent::TxDone;
         return r;
     }
@@ -58,6 +64,7 @@ RadioPoll FakeRadio::poll(std::uint8_t* dst, std::size_t cap) {
 void FakeRadio::shutdown() {
     ready_ = false;
     tx_pending_ = false;
+    deaf_ = false;
     tx_done_ = 0;
     rx_.clear();
 }
@@ -87,10 +94,11 @@ void FakeRadioBus::advance_to(std::uint64_t now_ms) {
         if (!next) break;
         next->tx_pending_ = false;
         ++next->tx_done_;
+        if (cfg_.deaf_until_poll) next->deaf_ = true;
         if (drop_filter_ && drop_filter_(next->tx_.bytes)) continue;
         const std::uint64_t start = next->tx_.start;
         for (auto& rx : radios_) {
-            if (rx.get() == next || !rx->ready_) continue;
+            if (rx.get() == next || !rx->ready_ || rx->deaf_) continue;
             const bool deaf = std::any_of(rx->tx_history_.begin(), rx->tx_history_.end(),
                                           [&](const auto& iv) { return iv.first <= start && start < iv.second; });
             if (deaf || lost()) continue;

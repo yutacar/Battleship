@@ -67,6 +67,10 @@ constexpr uint16_t kNetGamePort = 35354;
 /// (ACK 400ms, PING 2s, disconnect 10s) -- and never blocks the LVGL thread
 /// (every net/ API is non-blocking poll style).
 constexpr uint32_t kNetPollIntervalMs = 100;
+// LoRa: the SX1262 sits deaf in standby after every TX until poll() services
+// TxDone and re-arms RX, so the radio must be serviced much faster than the
+// UI-rate net poll (see LoRaLink::LinkTiming::rx_turnaround_ms).
+constexpr uint32_t kLoRaPollIntervalMs = 10;
 
 // ---- LoRa (Phase 8) ----
 
@@ -970,10 +974,7 @@ void BaseViewModel::start_network_host() {
         net_status_subject_.set(
             i18n::trf(i18n::StrId::NetLoraHostingAs, advertised.c_str()).c_str());
 
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -1001,10 +1002,7 @@ void BaseViewModel::start_network_host() {
         net_status_subject_.set(
             i18n::trf(i18n::StrId::NetLobbyAdvertisingAs, advertised.c_str()).c_str());
 
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -1036,9 +1034,7 @@ void BaseViewModel::start_network_host() {
                                       static_cast<unsigned>(net_transport_->local_port()))
                                 .c_str());
 
-    if (!net_poll_timer_) {
-        net_poll_timer_ = lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-    }
+    ensure_net_poll_timer();
     show_page(model::AppPage::NetLobby);
 }
 
@@ -1054,10 +1050,7 @@ void BaseViewModel::start_network_join() {
         net_lora_link_->start_scan(net_lora_now_ms());
         net_hosts_signature_ = 0;
         net_status_subject_.set(i18n::tr(i18n::StrId::NetJoinScanningLora));
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
         show_page(model::AppPage::NetJoin);
         return;
@@ -1070,10 +1063,7 @@ void BaseViewModel::start_network_join() {
         net_hosts_signature_ = 0;
         net_status_subject_.set(i18n::tr(net_ble_scanning_ ? i18n::StrId::NetJoinScanningBle
                                                            : i18n::StrId::NetBleUnavailable));
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
         show_page(model::AppPage::NetJoin);
         return;
@@ -1084,9 +1074,7 @@ void BaseViewModel::start_network_join() {
     net_hosts_signature_ = 0;
     net_status_subject_.set(i18n::tr(net_discovering_ ? i18n::StrId::NetJoinSearching
                                                         : i18n::StrId::NetJoinDiscoveryUnavailable));
-    if (!net_poll_timer_) {
-        net_poll_timer_ = lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-    }
+    ensure_net_poll_timer();
     net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
     show_page(model::AppPage::NetJoin);
 }
@@ -1154,9 +1142,7 @@ bool BaseViewModel::net_connect_to(const std::string& ip, uint16_t port) {
                                       static_cast<unsigned>(port))
                                 .c_str());
 
-    if (!net_poll_timer_) {
-        net_poll_timer_ = lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-    }
+    ensure_net_poll_timer();
     show_page(model::AppPage::NetLobby);
     return true;
 }
@@ -1184,10 +1170,7 @@ void BaseViewModel::join_host_at(size_t index) {
         net_status_subject_.set(
             i18n::trf(i18n::StrId::NetLobbyConnectingToBle, peer.host_name.c_str()).c_str());
 
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -1218,10 +1201,7 @@ void BaseViewModel::join_host_at(size_t index) {
         net_status_subject_.set(
             i18n::trf(i18n::StrId::NetLobbyConnectingToBle, peer.name.c_str()).c_str());
 
-        if (!net_poll_timer_) {
-            net_poll_timer_ =
-                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
-        }
+        ensure_net_poll_timer();
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -1411,6 +1391,14 @@ void BaseViewModel::net_lora_closing_timer_cb(lv_timer_t* timer) {
     self->net_lora_closing_->link->poll(now);
 }
 
+void BaseViewModel::ensure_net_poll_timer() {
+    if (net_poll_timer_) {
+        return;
+    }
+    const uint32_t period = net_lora_link_ ? kLoRaPollIntervalMs : kNetPollIntervalMs;
+    net_poll_timer_ = lv_timer_create(&BaseViewModel::net_poll_timer_cb, period, this);
+}
+
 void BaseViewModel::net_poll_timer_cb(lv_timer_t* timer) {
     auto* self = static_cast<BaseViewModel*>(lv_timer_get_user_data(timer));
     if (self) {
@@ -1457,21 +1445,6 @@ void BaseViewModel::net_poll() {
         // exists, NetSession::poll drives it through LoRaTransport::poll.
         net_lora_link_->poll(net_lora_now_ms());
     }
-    if (net_lora_link_ && net_lora_link_->state() == battleship::net::lora::LinkState::Scanning) {
-        // Same change detection as above over the LoRa beacon peers. RSSI is
-        // part of the label, so it is part of the signature too (the Join
-        // screen keeps keyboard focus on the same row across rebuilds).
-        const auto& peers = net_lora_link_->peers();
-        size_t signature = peers.size() * 1000003u;
-        for (const auto& peer : peers) {
-            signature = signature * 31u + std::hash<std::string>{}(peer.host_name) +
-                        peer.session_id * 131u + static_cast<size_t>(peer.rssi_dbm + 200);
-        }
-        if (signature != net_hosts_signature_) {
-            net_hosts_signature_ = signature;
-            net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
-        }
-    }
     if (net_session_) {
         net_session_->poll(now);
     }
@@ -1489,6 +1462,27 @@ void BaseViewModel::net_poll() {
             return;
         }
         net_lora_seen_state_ = state;
+    }
+    // LoRa runs this function every kLoRaPollIntervalMs so the radio is
+    // serviced promptly; the UI-side work below stays at the 100 ms rate.
+    if (net_lora_link_ && now - net_poll_ui_last_ms_ < kNetPollIntervalMs) {
+        return;
+    }
+    net_poll_ui_last_ms_ = now;
+    if (net_lora_link_ && net_lora_link_->state() == battleship::net::lora::LinkState::Scanning) {
+        // Same change detection as above over the LoRa beacon peers. RSSI is
+        // part of the label, so it is part of the signature too (the Join
+        // screen keeps keyboard focus on the same row across rebuilds).
+        const auto& peers = net_lora_link_->peers();
+        size_t signature = peers.size() * 1000003u;
+        for (const auto& peer : peers) {
+            signature = signature * 31u + std::hash<std::string>{}(peer.host_name) +
+                        peer.session_id * 131u + static_cast<size_t>(peer.rssi_dbm + 200);
+        }
+        if (signature != net_hosts_signature_) {
+            net_hosts_signature_ = signature;
+            net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
+        }
     }
     if (net_session_) {
         net_sync_session_state();

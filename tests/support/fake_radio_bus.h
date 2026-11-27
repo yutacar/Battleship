@@ -27,6 +27,11 @@ struct FakeBusConfig {
     // returns Busy while another radio's transmission is on air. Mirrors the
     // real SX1262 LBT/CAD. Set false to model hidden terminals (collisions).
     bool carrier_sense = false;
+    // Models the SX1262 RxTxFallbackMode STDBY_XOSC: after its emission ends a
+    // radio is deaf (in standby) until its next poll() that delivers TxDone
+    // (where the driver re-arms RX). Packets that start or end in that window
+    // are dropped for that radio. Default off (ideal instant re-arm).
+    bool deaf_until_poll = false;
 };
 
 class FakeRadioBus;
@@ -67,6 +72,7 @@ private:
     std::int16_t rssi_;
     bool ready_ = true;
     bool tx_pending_ = false; // transmitting, delivery not yet done
+    bool deaf_ = false;       // deaf_until_poll: TxDone ended, RX not re-armed yet
     int tx_done_ = 0;         // TxDone events not yet polled
     Tx tx_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> tx_history_;

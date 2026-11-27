@@ -25,6 +25,7 @@ void LoRaLink::start_host(const std::string& host_name, std::uint64_t now_ms) {
     tx_queue_.clear();
     peers_.clear();
     rx_data_.clear();
+    have_rx_ = false;
     state_ = LinkState::Beaconing;
     next_beacon_ms_ = now_ms;
 }
@@ -34,6 +35,7 @@ void LoRaLink::start_scan(std::uint64_t) {
     peers_.clear();
     rx_data_.clear();
     session_id_ = 0;
+    have_rx_ = false;
     state_ = LinkState::Scanning;
 }
 
@@ -172,6 +174,8 @@ void LoRaLink::backoff(std::uint64_t now_ms) {
 
 void LoRaLink::pump_tx(std::uint64_t now_ms) {
     if (tx_in_flight_ || tx_queue_.empty() || now_ms < next_tx_ms_) return;
+    // Turnaround guard (see LinkTiming::rx_turnaround_ms): defer, never drop.
+    if (have_rx_ && now_ms < last_rx_ms_ + timing_.rx_turnaround_ms) return;
     const Entry& e = tx_queue_.front();
     const TxDecision d = policy_.evaluate(now_ms, e.bytes.size());
     if (d.status == TxDecisionStatus::Deferred) {
@@ -218,7 +222,11 @@ void LoRaLink::poll(std::uint64_t now_ms) {
         if (r.event == RadioEvent::TxDone) {
             tx_in_flight_ = false;
         } else if (r.event == RadioEvent::Received) {
-            if (auto p = decode_packet(buf, r.size)) handle(*p, r.rssi_dbm, now_ms);
+            if (auto p = decode_packet(buf, r.size)) {
+                last_rx_ms_ = now_ms;
+                have_rx_ = true;
+                handle(*p, r.rssi_dbm, now_ms);
+            }
         } else if (r.event == RadioEvent::Failed) {
             tx_in_flight_ = false;
         }

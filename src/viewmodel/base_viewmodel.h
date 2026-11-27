@@ -377,6 +377,8 @@ private:
     /// page navigation. Never blocks: every net/ API is non-blocking.
     static void net_poll_timer_cb(lv_timer_t* timer);
     void net_poll();
+    /// Creates the net poll timer if absent: 10 ms for LoRa flows, else 100 ms.
+    void ensure_net_poll_timer();
     /// Applies a newly observed session state change (shot results, phase
     /// changes) to the status line / board-dirty subject / page navigation.
     void net_sync_session_state();
@@ -479,6 +481,7 @@ private:
     int net_autopilot_placed_ = 0;
     int net_autopilot_tick_ = 0;
     bool net_announcing_ = false;
+    uint32_t net_poll_ui_last_ms_ = 0;  // LoRa: last 100 ms-rate net_poll pass
     uint32_t net_seen_change_counter_ = 0;
     battleship::net::SessionPhase net_seen_phase_ = battleship::net::SessionPhase::Handshake;
     size_t net_hosts_signature_ = 0;

@@ -383,3 +383,93 @@ TEST(LoraLink, PendingByeIsDroppedAfterWindow) {
     EXPECT_EQ(bus.tx_log().size(), before); // no late BYE, nothing else either
     EXPECT_EQ(client.link.state(), LinkState::Closed);
 }
+
+// ---- Half-duplex deafness (SX1262 STDBY_XOSC fallback) -----------------------
+//
+// After its own emission a node hears nothing until its next poll() services
+// TxDone and re-arms RX. Found on hardware: with a 100 ms poll the ACCEPT
+// answering a JOIN always landed in the joiner's deaf window.
+
+namespace {
+
+struct DeafNode {
+    FakeRadio& radio;
+    LoRaLink link;
+    std::uint64_t poll_ms;
+    DeafNode(FakeRadioBus& bus, std::uint32_t seed, LinkTiming timing, std::uint64_t poll)
+        : radio(bus.add_radio()), link(radio, Japan920Policy{}, seed, timing), poll_ms(poll) {}
+};
+
+FakeBusConfig deaf_cfg() {
+    FakeBusConfig c;
+    c.carrier_sense = true;
+    c.deaf_until_poll = true;
+    return c;
+}
+
+// 1 ms simulation clock; each node is polled on its own period grid.
+// Returns true when both links are Connected within 20 s.
+bool deaf_connect(FakeRadioBus& bus, DeafNode& host, DeafNode& client) {
+    host.link.start_host("HOST", 0);
+    client.link.start_scan(0);
+    bool joined = false;
+    for (std::uint64_t t = 0; t < 20000; ++t) {
+        bus.advance_to(t);
+        if (t % host.poll_ms == 0) host.link.poll(t);
+        if (t % client.poll_ms == 0) {
+            client.link.poll(t);
+            if (!joined && !client.link.peers().empty()) {
+                joined = client.link.join(client.link.peers()[0].session_id, t);
+            }
+        }
+        if (host.link.state() == LinkState::Connected && client.link.state() == LinkState::Connected) return true;
+    }
+    return false;
+}
+
+} // namespace
+
+TEST(LoraLinkDeaf, TurnaroundGuardLetsJoinHandshakeSucceed) {
+    LinkTiming timing; // rx_turnaround_ms = 40
+    ASSERT_EQ(timing.rx_turnaround_ms, 40u);
+    FakeRadioBus bus(deaf_cfg());
+    DeafNode host(bus, 1, timing, 10);
+    DeafNode client(bus, 2, timing, 10);
+    EXPECT_TRUE(deaf_connect(bus, host, client));
+    EXPECT_EQ(host.link.state(), LinkState::Connected);
+    EXPECT_EQ(client.link.state(), LinkState::Connected);
+}
+
+TEST(LoraLinkDeaf, WithoutGuardAndSlowPollJoinFails) {
+    // Reproduces the hardware bug: 100 ms poll, no turnaround guard.
+    LinkTiming timing;
+    timing.rx_turnaround_ms = 0;
+    FakeRadioBus bus(deaf_cfg());
+    DeafNode host(bus, 1, timing, 10);
+    DeafNode client(bus, 2, timing, 100);
+    EXPECT_FALSE(deaf_connect(bus, host, client));
+    EXPECT_EQ(client.link.state(), LinkState::Failed);
+}
+
+TEST(LoraLinkDeaf, DataFlowsBothWaysUnderDeafness) {
+    LinkTiming timing;
+    FakeRadioBus bus(deaf_cfg());
+    DeafNode host(bus, 1, timing, 10);
+    DeafNode client(bus, 2, timing, 10);
+    ASSERT_TRUE(deaf_connect(bus, host, client));
+    const auto a = payload13(1), b = payload13(50);
+    ASSERT_TRUE(host.link.send_data(a.data(), a.size()));
+    ASSERT_TRUE(client.link.send_data(b.data(), b.size()));
+    std::vector<std::uint8_t> got_h, got_c;
+    for (std::uint64_t t = 20000; t < 23000; ++t) {
+        bus.advance_to(t);
+        if (t % 10 == 0) {
+            host.link.poll(t);
+            client.link.poll(t);
+        }
+        host.link.take_received(got_h);
+        client.link.take_received(got_c);
+    }
+    EXPECT_EQ(got_h, b);
+    EXPECT_EQ(got_c, a);
+}

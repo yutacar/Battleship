@@ -41,6 +41,13 @@ struct LinkTiming {
     std::uint32_t lbt_backoff_max_ms = 60;
     std::size_t tx_queue_limit = 16;
     std::uint32_t bye_window_ms = 500; // how long a pending BYE is retried after close()
+    // Half-duplex turnaround guard: no transmission starts earlier than this
+    // long after the last packet received from the air. After its own TX the
+    // peer's SX1262 sits deaf in standby until its poll() services TxDone and
+    // re-arms RX (poll interval + re-arm time); replying sooner than that
+    // would land in the peer's deaf window and be lost. Must exceed the peer's
+    // poll interval (10 ms on device) with margin.
+    std::uint32_t rx_turnaround_ms = 40;
 };
 
 class LoRaLink {
@@ -98,6 +105,8 @@ private:
     std::deque<Entry> tx_queue_;
     bool tx_in_flight_ = false;
     std::uint64_t next_tx_ms_ = 0;
+    std::uint64_t last_rx_ms_ = 0;
+    bool have_rx_ = false;
     std::uint64_t next_beacon_ms_ = 0;
     std::uint64_t next_join_ms_ = 0;
     std::uint64_t bye_deadline_ms_ = 0;

@@ -43,14 +43,18 @@ struct Rig {
     std::unique_ptr<net::NetSession> host;
     std::unique_ptr<net::NetSession> client;
 
-    Rig(double loss, uint32_t seed)
-        : bus(FakeBusConfig{loss, seed, true, true}),
+    uint64_t step = kStep; // poll period used by connect()
+
+    Rig(double loss, uint32_t seed, bool deaf = false, uint64_t poll_ms = kStep)
+        : bus(FakeBusConfig{loss, seed, true, true, deaf}),
           radio_host(bus.add_radio()),
           radio_client(bus.add_radio()),
           link_host(radio_host, Japan920Policy{}, seed * 2 + 1),
           link_client(radio_client, Japan920Policy{}, seed * 2 + 2),
           transport_host(link_host, [this] { return now; }),
-          transport_client(link_client, [this] { return now; }) {}
+          transport_client(link_client, [this] { return now; }) {
+        step = poll_ms;
+    }
 
     void make_sessions(uint32_t seed) {
         host = std::make_unique<net::NetSession>(transport_host, net::SessionRole::Host,
@@ -74,7 +78,7 @@ struct Rig {
         link_host.start_host("HOST", now);
         link_client.start_scan(now);
         bool joined = false;
-        for (uint64_t t = now; t <= limit_ms; t += kStep) {
+        for (uint64_t t = now; t <= limit_ms; t += step) {
             tick(t);
             if (!joined && !link_client.peers().empty()) {
                 joined = link_client.join(link_client.peers().front().session_id, now);
@@ -93,7 +97,7 @@ void play_full_game(Rig& rig, uint32_t seed) {
     const uint64_t base = rig.now;
     battleship::testing::run_full_game(
         *rig.host, *rig.client, [&](uint32_t t) { rig.tick(base + t); }, seed,
-        static_cast<uint32_t>(kStep));
+        static_cast<uint32_t>(rig.step));
 }
 
 } // namespace
@@ -141,6 +145,32 @@ TEST(LoRaTransport, FullGameOverFakeLoRaLossyLink) {
     for (uint32_t seed = 0; seed < 4; ++seed) {
         SCOPED_TRACE("seed " + std::to_string(seed));
         Rig rig(0.10, seed);
+        ASSERT_TRUE(rig.connect());
+        rig.make_sessions(seed);
+        play_full_game(rig, seed);
+        battleship::testing::expect_consistent_final_state(*rig.host, *rig.client);
+    }
+}
+
+// Half-duplex deafness model (radio deaf after each TX until the next poll)
+// with the on-device 10 ms poll period: a whole game must still complete.
+TEST(LoRaTransport, FullGameUnderRxDeafnessWithTenMsPolling) {
+    for (uint32_t seed = 0; seed < 5; ++seed) {
+        SCOPED_TRACE("seed " + std::to_string(seed));
+        Rig rig(0.0, seed, /*deaf=*/true, /*poll_ms=*/10);
+        ASSERT_TRUE(rig.connect());
+        rig.make_sessions(seed);
+        play_full_game(rig, seed);
+        std::printf("[game deaf] seed %u: %llu ms sim, %zu packets\n", seed,
+                    (unsigned long long)rig.now, rig.bus.tx_log().size());
+        battleship::testing::expect_consistent_final_state(*rig.host, *rig.client);
+    }
+}
+
+TEST(LoRaTransport, FullGameUnderRxDeafnessAndLoss) {
+    for (uint32_t seed = 0; seed < 4; ++seed) {
+        SCOPED_TRACE("seed " + std::to_string(seed));
+        Rig rig(0.05, seed, /*deaf=*/true, /*poll_ms=*/10);
         ASSERT_TRUE(rig.connect());
         rig.make_sessions(seed);
         play_full_game(rig, seed);
