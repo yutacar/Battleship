@@ -33,6 +33,7 @@ add_executable(battleship_core_tests
     test_net_reliable_link.cpp
     test_net_session.cpp
     test_net_tcp.cpp
+    test_lora_policy.cpp
     test_i18n_catalog.cpp
     test_i18n_settings.cpp
 )

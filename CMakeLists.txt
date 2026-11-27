@@ -54,6 +54,16 @@ if(BATTLESHIP_BLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "BATTLESHIP_BLE=ON requires a Linux target (BlueZ + libsystemd/sd-bus). "
         "Reconfigure with -DBATTLESHIP_BLE=OFF for this platform.")
 endif()
+# BATTLESHIP_LORA_HW: whether to build the Cap LoRa-1262 (SX1262) hardware
+# transport. Hardware access is Linux-only (SPI/GPIO on the CM0), so the
+# default is ON for Linux targets and OFF elsewhere (same rule as BLE).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(BATTLESHIP_LORA_HW_DEFAULT ON)
+else()
+    set(BATTLESHIP_LORA_HW_DEFAULT OFF)
+endif()
+set(BATTLESHIP_LORA_HW ${BATTLESHIP_LORA_HW_DEFAULT} CACHE BOOL
+    "Build the SX1262 LoRa hardware transport (Linux targets only)")
 # Export compile commands
 # Used for IDE IntelliSense
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" FORCE)
@@ -631,6 +641,7 @@ target_link_libraries(battleship_net
 target_compile_definitions(battleship_net
     PUBLIC
         BATTLESHIP_BLE=$<BOOL:${BATTLESHIP_BLE}>
+        BATTLESHIP_LORA_HW=$<BOOL:${BATTLESHIP_LORA_HW}>
 )
 
 if(BATTLESHIP_BLE)
