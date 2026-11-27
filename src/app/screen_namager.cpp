@@ -15,6 +15,7 @@
 #include "difficulty_screen.h"
 #include "handover_screen.h"
 #include "menu_screen.h"
+#include "net_antenna_screen.h"
 #include "net_direct_ip_screen.h"
 #include "net_error_screen.h"
 #include "net_join_screen.h"
@@ -209,6 +210,9 @@ void ScreenManager::show_screen_for_page(model::AppPage page) {
         case model::AppPage::NetTransport:
             load_screen(std::make_unique<screen::NetTransportScreen>(view_model_, assets_));
             break;
+        case model::AppPage::NetAntennaConfirm:
+            load_screen(std::make_unique<screen::NetAntennaScreen>(view_model_, assets_));
+            break;
         case model::AppPage::NetworkMenu:
             load_screen(std::make_unique<screen::NetworkMenuScreen>(view_model_, assets_));
             break;
@@ -394,6 +398,8 @@ void ScreenManager::handle_short_esc() {
             view_model_.show_page(model::AppPage::Menu);
             break;
         case model::AppPage::NetworkMenu:
+        case model::AppPage::NetAntennaConfirm:
+            // Antenna check: back WITHOUT persisting the LoRa choice.
             view_model_.show_page(model::AppPage::NetTransport);
             break;
         case model::AppPage::NetLobby:

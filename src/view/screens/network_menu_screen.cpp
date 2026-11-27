@@ -68,11 +68,17 @@ void NetworkMenuScreen::build_content(lv_obj_t* content) {
     auto* hint = lv_label_create(content);
     // WiFi keeps the same-network reminder from Phase 4; BLE needs no AP, so
     // it just restates the selected method ("Method: Bluetooth (BLE)").
-    const std::string hint_text =
-        view_model().net_using_ble()
-            ? i18n::trf(i18n::StrId::NetTransportMethodLine,
-                        i18n::tr(i18n::StrId::NetTransportBle))
-            : std::string(i18n::tr(i18n::StrId::NetworkPlayHint));
+    // LoRa likewise just restates the method.
+    std::string hint_text;
+    if (view_model().net_using_lora()) {
+        hint_text = i18n::trf(i18n::StrId::NetTransportMethodLine,
+                              i18n::tr(i18n::StrId::NetTransportLora));
+    } else if (view_model().net_using_ble()) {
+        hint_text = i18n::trf(i18n::StrId::NetTransportMethodLine,
+                              i18n::tr(i18n::StrId::NetTransportBle));
+    } else {
+        hint_text = i18n::tr(i18n::StrId::NetworkPlayHint);
+    }
     lv_label_set_text(hint, hint_text.c_str());
     lv_obj_set_style_text_font(hint, i18n::font_for_size(12), 0);
     lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 34);

@@ -14,6 +14,7 @@
 #include "i18n/fonts.h"
 #include "i18n/strings.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 
@@ -49,6 +50,14 @@ void rebuild_host_list(JoinUi* ui) {
     // BLE -> scan results. join_host_at() accepts the same index space.
     const size_t peer_count = view_model.net_peer_count();
 
+    // Keep keyboard focus on the same row across rebuilds: the LoRa list is
+    // rebuilt whenever a peer's RSSI changes, which must not yank focus.
+    int focused_row = -1;
+    if (lv_obj_t* focused = lv_group_get_focused(BaseScreen::shared_group());
+        focused && lv_obj_get_parent(focused) == ui->list) {
+        focused_row = static_cast<int>(lv_obj_get_index(focused));
+    }
+
     lv_obj_clean(ui->list);
 
     if (ui->empty_label) {
@@ -73,6 +82,11 @@ void rebuild_host_list(JoinUi* ui) {
         lv_obj_add_event_cb(button, host_button_cb, LV_EVENT_CLICKED, ui);
         lv_group_add_obj(BaseScreen::shared_group(), button);
         BaseScreen::enable_arrow_focus_navigation(button);
+    }
+
+    if (focused_row >= 0 && peer_count > 0) {
+        const auto row = std::min(static_cast<size_t>(focused_row), peer_count - 1);
+        lv_group_focus_obj(lv_obj_get_child(ui->list, static_cast<int32_t>(row)));
     }
 }
 
@@ -135,17 +149,19 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     ui->list = list;
 
     const bool ble = view_model().net_using_ble();
+    const bool lora = view_model().net_using_lora();
 
     auto* empty = lv_label_create(content);
-    lv_label_set_text(empty, i18n::tr(ble ? i18n::StrId::NetJoinScanningBle
-                                          : i18n::StrId::NetJoinSearching));
+    lv_label_set_text(empty, i18n::tr(lora  ? i18n::StrId::NetJoinScanningLora
+                                      : ble ? i18n::StrId::NetJoinScanningBle
+                                            : i18n::StrId::NetJoinSearching));
     lv_obj_set_style_text_font(empty, i18n::font_for_size(12), 0);
     lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 64);
     reactive::bind_theme(empty, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
     ui->empty_label = empty;
 
-    // Bottom row: Direct IP fallback (WiFi only -- BLE has no address to
-    // type; scan results are the only join path) + Back.
+    // Bottom row: Direct IP fallback (WiFi only -- BLE/LoRa have no address
+    // to type; scan results are the only join path) + Back.
     auto* buttons = lv_obj_create(content);
     lv_obj_remove_style_all(buttons);
     lv_obj_set_size(buttons, LV_PCT(100), 28);
@@ -156,7 +172,7 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_clear_flag(buttons, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* direct_button = nullptr;
-    if (!ble) {
+    if (!ble && !lora) {
         direct_button = lv_button_create(buttons);
         lv_obj_set_size(direct_button, 120, 24);
         reactive::bind_theme(direct_button, view_model().dark_mode_subject(),

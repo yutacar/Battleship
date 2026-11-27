@@ -44,6 +44,11 @@ void NetLobbyScreen::build_content(lv_obj_t* content) {
     // Host: "Your address: <ip>:<port>". Client: "Connecting to <ip>:<port>".
     // Kept live via the subject so e.g. an error message can replace it.
     auto* status = lv_label_create(content);
+    // Wrapped (and centered): "Recruiting over LoRa as BSHIP-<host> ..." can
+    // exceed one line with a long host name.
+    lv_label_set_long_mode(status, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(status, 300);
+    lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(status, i18n::font_for_size(12), 0);
     lv_obj_align(status, LV_ALIGN_CENTER, 0, -14);
     reactive::bind_theme(status, view_model().dark_mode_subject(), reactive::ThemeRole::Text);

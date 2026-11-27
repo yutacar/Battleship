@@ -37,6 +37,9 @@
 #include "i18n/settings.h"
 #include "i18n/strings.h"
 #include "net/discovery.h"
+#include "net/lora/lora_link.h"
+#include "net/lora/lora_transport.h"
+#include "net/lora/radio_factory.h"
 #include "net/net_session.h"
 #include "net/tcp_transport.h"
 #if BATTLESHIP_BLE
@@ -274,8 +277,22 @@ public:
     /// restarts via settings.conf, PLAN.md Phase 6 "選択は設定に永続化").
     i18n::NetTransportPref net_transport_pref() const { return i18n::net_transport_pref(); }
     /// NetTransport screen selection: persists `pref` as the new default and
-    /// advances to the Host/Join submenu.
+    /// advances to the Host/Join submenu. LoRa is the exception while the
+    /// antenna has never been confirmed: nothing is persisted yet and the
+    /// one-time antenna confirmation page (NetAntennaConfirm) is shown
+    /// first (see confirm_lora_antenna()).
     void select_net_transport(i18n::NetTransportPref pref);
+    /// NetAntennaConfirm "Enter: Yes": persists the antenna confirmation and
+    /// the LoRa preference, then advances to the Host/Join submenu. (Esc on
+    /// that page returns to NetTransport without persisting anything.)
+    void confirm_lora_antenna();
+    /// True when the network flow being set up uses LoRa (persisted
+    /// preference). Unlike BLE this is available on every build: devices
+    /// drive the Cap LoRa-1262, the desktop build a UDP radio simulator
+    /// (net/lora/radio_factory.h, default_radio_backend()).
+    bool net_using_lora() const {
+        return i18n::net_transport_pref() == i18n::NetTransportPref::Lora;
+    }
     /// Effective transport for the network flow being set up: the persisted
     /// preference, downgraded to WiFi when BLE isn't available in this build
     /// (the preference itself is NOT rewritten -- see i18n::NetTransportPref).
@@ -306,12 +323,14 @@ public:
         return net_discoverer_.hosts();
     }
     /// Transport-agnostic peer list for the NetJoin screen: WiFi -> the UDP
-    /// discovery hosts above, BLE -> the BLE scan results. Both change under
+    /// discovery hosts above, BLE -> the BLE scan results, LoRa -> the
+    /// link's beacon peers. All change under
     /// net_hosts_dirty_subject(); join_host_at(index) accepts the same index
     /// space.
     size_t net_peer_count() const;
     /// Display label for peer `index` ("name (ip:port)" on WiFi,
-    /// "name (address)" on BLE). Empty if out of range.
+    /// "name (address)" on BLE, "name  -42 dBm" on LoRa). Empty if out of
+    /// range.
     std::string net_peer_label(size_t index) const;
     /// Lobby/status line ("Waiting for opponent...", "Connection lost", ...).
     lv_subject_t* net_status_subject();
@@ -363,8 +382,28 @@ private:
     void net_sync_session_state();
     void net_update_battle_status();
     /// Tears down session/transport/announcer/discoverer/timer. Safe to call
-    /// redundantly.
+    /// redundantly. A LoRa link that was Connected is closed (BYE attempted)
+    /// and handed to the short-lived "closing" holder below instead of being
+    /// destroyed on the spot, so the BYE can still go out.
     void teardown_network();
+
+    // ---- LoRa internals (Phase 8) ----
+    /// Opens the radio (finishing any still-draining closing holder first,
+    /// so two radios are never open at once) and creates the link. On
+    /// failure releases everything, routes to NetError with the mapped
+    /// message and returns false.
+    bool net_lora_open();
+    /// Shows NetError for a radio start failure / link failure.
+    void net_lora_show_error(i18n::StrId message);
+    /// Closes the current LoRa link; keeps the closed objects alive in
+    /// net_lora_closing_ for <= kLoraCloseDrainMs when a BYE may still be
+    /// pending, otherwise destroys them immediately (radio before power).
+    void net_lora_begin_close();
+    /// Destroys the closing holder (if any) right now.
+    void net_lora_finish_closing();
+    static void net_lora_closing_timer_cb(lv_timer_t* timer);
+    /// Monotonic millisecond clock for the LoRa link/transport.
+    static uint64_t net_lora_now_ms();
     /// Test-only autopilot (BATTLESHIP_NET_AUTOPILOT=win|lose, desktop
     /// 2-process verification): auto-places the fleet and auto-fires on our
     /// turn so a full networked match can run unattended. See net_poll().
@@ -408,6 +447,24 @@ private:
     battleship::net::BleScanner net_ble_scanner_;
     bool net_ble_scanning_ = false;
 #endif
+    // ---- LoRa (Phase 8) ----
+    // Declaration order matters for destruction: radio handle (radio, then
+    // Cap power) must outlive the link, which must outlive the transport;
+    // teardown_network() also resets them explicitly in that order after
+    // the NetSession that references the transport.
+    battleship::net::lora::RadioHandle net_lora_radio_;
+    std::unique_ptr<battleship::net::lora::LoRaLink> net_lora_link_;
+    std::unique_ptr<battleship::net::lora::LoRaTransport> net_lora_transport_;
+    /// True while the CURRENT flow runs over LoRa (see net_flow_ble_).
+    bool net_flow_lora_ = false;
+    /// Link state seen at the previous poll: distinguishes "join attempts
+    /// exhausted" from a radio failure when the link reports Failed.
+    battleship::net::lora::LinkState net_lora_seen_state_ = battleship::net::lora::LinkState::Idle;
+    /// Closed-but-draining LoRa objects (BYE window) after teardown.
+    struct LoraClosing;
+    std::unique_ptr<LoraClosing> net_lora_closing_;
+    lv_timer_t* net_lora_closing_timer_ = nullptr;
+
     /// True while the CURRENT hosting/joining/playing flow runs over BLE
     /// (as opposed to the persisted preference, which the user can change
     /// between matches without touching an in-flight session).
@@ -451,7 +508,9 @@ private:
     reactive::IntSubject board_dirty_subject_;
     reactive::StringSubject<64> status_text_subject_;
     reactive::StringSubject<160> commentary_text_subject_;
-    reactive::StringSubject<96> net_status_subject_;
+    // 192 bytes: the longest message (JA NetLoraCapMissing, ~110 bytes of
+    // UTF-8) must fit without being cut mid-character.
+    reactive::StringSubject<192> net_status_subject_;
     reactive::IntSubject net_hosts_dirty_subject_;
     reactive::IntSubject language_version_subject_;
     reactive::BoolSubject interrupt_modal_subject_;

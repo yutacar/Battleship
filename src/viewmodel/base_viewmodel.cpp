@@ -6,12 +6,15 @@
 
 #include "base_viewmodel.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
 
 #include "commentary/commentator_factory.h"
 #include "i18n/settings.h"
+#include "net/ble/ble_transport.h"  // kBleNamePrefix only (header is safe on every platform)
+#include "net/lora/japan920_policy.h"
 
 using battleship::core::Coord;
 using battleship::core::MatchStatus;
@@ -65,6 +68,44 @@ constexpr uint16_t kNetGamePort = 35354;
 /// (every net/ API is non-blocking poll style).
 constexpr uint32_t kNetPollIntervalMs = 100;
 
+// ---- LoRa (Phase 8) ----
+
+/// How long closed LoRa objects are kept alive after teardown so a pending
+/// BYE can still be transmitted (LoRaLink retries it for
+/// LinkTiming::bye_window_ms = 500 ms; 100 ms of margin on top).
+constexpr uint64_t kLoraCloseDrainMs = 600;
+/// Poll period of the closing holder's timer while the BYE drains.
+constexpr uint32_t kLoraClosePollMs = 20;
+
+/// Destroys a radio handle in the ownership order: radio first, then the
+/// Cap power (whose destructor switches the 5V output off). Plain
+/// move-assignment of a RadioHandle would assign -- and so destroy -- the
+/// power member first, hence this helper.
+void release_radio(battleship::net::lora::RadioHandle& handle) {
+    if (!handle.radio && !handle.power) {
+        return;
+    }
+    handle.radio.reset();
+    handle.power.reset();
+    // Lifecycle trace for on-device power checks (ext_5v_out) and the
+    // desktop 2-process runs; stdout is line-buffered (see app.cpp).
+    std::printf("[lora] radio released\n");
+}
+
+/// open_radio()/link failure -> user-facing message (controller ruling):
+/// a missing Cap shows up as ExpanderMissing / RadioNoResponse; anything
+/// else is reported as a generic "radio could not start".
+i18n::StrId lora_error_message(battleship::net::lora::RadioInitError error) {
+    using battleship::net::lora::RadioInitError;
+    switch (error) {
+        case RadioInitError::ExpanderMissing:
+        case RadioInitError::RadioNoResponse:
+            return i18n::StrId::NetLoraCapMissing;
+        default:
+            return i18n::StrId::NetLoraUnavailable;
+    }
+}
+
 /// "You B4: Hit!" / "Foe C7: Sunk your Cruiser!"-style status fragment.
 /// `who_id` is i18n::StrId::NetYou or NetFoe; the coordinate stays in the
 /// untranslated A1-J10 notation in every language (PLAN.md Phase 5:
@@ -90,6 +131,15 @@ std::string net_shot_text(i18n::StrId who_id, Coord target,
 }
 
 } // namespace
+
+/// Closed LoRa objects kept alive briefly so the BYE can drain. Member order
+/// gives destruction transport -> link -> radio (radio, then Cap power).
+struct BaseViewModel::LoraClosing {
+    battleship::net::lora::RadioHandle radio;
+    std::unique_ptr<battleship::net::lora::LoRaLink> link;
+    std::unique_ptr<battleship::net::lora::LoRaTransport> transport;
+    uint64_t deadline_ms = 0;
+};
 
 BaseViewModel::BaseViewModel()
     : commentator_(battleship::commentary::make_default_commentator()),
@@ -141,6 +191,9 @@ BaseViewModel::BaseViewModel()
 
 BaseViewModel::~BaseViewModel() {
     teardown_network();
+    // Application exit: no waiting for the BYE window (close() already made
+    // the immediate BYE attempt) -- destroy radio and release power now.
+    net_lora_finish_closing();
     cancel_ai_turn();
     if (commentary_poll_timer_) {
         lv_timer_delete(commentary_poll_timer_);
@@ -213,7 +266,8 @@ model::AppPage BaseViewModel::current_page() const {
 
 void BaseViewModel::show_page(model::AppPage page) {
     if (page == model::AppPage::Menu &&
-        (net_session_ || net_transport_ || net_discovering_ || net_announcing_ || net_poll_timer_)) {
+        (net_session_ || net_transport_ || net_discovering_ || net_announcing_ || net_poll_timer_ ||
+         net_lora_link_)) {
         // Returning to the title from anywhere in the network flow (Result's
         // Title button, the NetError dialog, ...) always abandons the
         // session/lobby/discovery -- there is no way to "background" a
@@ -873,14 +927,56 @@ void BaseViewModel::open_network_menu() {
 }
 
 void BaseViewModel::select_net_transport(i18n::NetTransportPref pref) {
+    if (pref == i18n::NetTransportPref::Lora && !i18n::antenna_confirmed()) {
+        // One-time safety check before the first LoRa transmission: nothing
+        // is persisted until the user confirms (Esc there goes back here).
+        show_page(model::AppPage::NetAntennaConfirm);
+        return;
+    }
     // Persist immediately so this choice preselects next time (PLAN.md
     // Phase 6 "選択は設定に永続化（次回デフォルト）").
     i18n::save_net_transport_pref(pref);
     show_page(model::AppPage::NetworkMenu);
 }
 
+void BaseViewModel::confirm_lora_antenna() {
+    i18n::save_antenna_confirmed(true);
+    i18n::save_net_transport_pref(i18n::NetTransportPref::Lora);
+    show_page(model::AppPage::NetworkMenu);
+}
+
 void BaseViewModel::start_network_host() {
     teardown_network();
+
+    if (net_using_lora()) {
+        if (!net_lora_open()) {
+            return;  // NetError already shown, radio/power released
+        }
+        const std::string host_name = battleship::net::local_host_name();
+        // The beacon itself carries the host name (truncated to 12 chars by
+        // the packet codec); the lobby shows the same "BSHIP-" form BLE uses.
+        net_lora_link_->start_host(host_name, net_lora_now_ms());
+        net_lora_transport_ = std::make_unique<battleship::net::lora::LoRaTransport>(
+            *net_lora_link_, &BaseViewModel::net_lora_now_ms);
+
+        net_is_host_ = true;
+        net_session_ = std::make_unique<battleship::net::NetSession>(
+            *net_lora_transport_, battleship::net::SessionRole::Host, rng_(),
+            battleship::net::lora::lora_session_config());
+        net_seen_change_counter_ = 0;
+        net_seen_phase_ = battleship::net::SessionPhase::Handshake;
+
+        const std::string advertised = std::string(battleship::net::kBleNamePrefix) + host_name;
+        net_status_subject_.set(
+            i18n::trf(i18n::StrId::NetLoraHostingAs, advertised.c_str()).c_str());
+
+        if (!net_poll_timer_) {
+            net_poll_timer_ =
+                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
+        }
+        show_page(model::AppPage::NetLobby);
+        return;
+    }
 
 #if BATTLESHIP_BLE
     if (net_using_ble()) {
@@ -951,6 +1047,22 @@ void BaseViewModel::start_network_join() {
 
     net_is_host_ = false;
 
+    if (net_using_lora()) {
+        if (!net_lora_open()) {
+            return;  // NetError already shown, radio/power released
+        }
+        net_lora_link_->start_scan(net_lora_now_ms());
+        net_hosts_signature_ = 0;
+        net_status_subject_.set(i18n::tr(i18n::StrId::NetJoinScanningLora));
+        if (!net_poll_timer_) {
+            net_poll_timer_ =
+                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
+        }
+        net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
+        show_page(model::AppPage::NetJoin);
+        return;
+    }
+
 #if BATTLESHIP_BLE
     if (net_using_ble()) {
         net_flow_ble_ = true;
@@ -980,6 +1092,9 @@ void BaseViewModel::start_network_join() {
 }
 
 size_t BaseViewModel::net_peer_count() const {
+    if (net_flow_lora_) {
+        return net_lora_link_ ? net_lora_link_->peers().size() : 0;
+    }
 #if BATTLESHIP_BLE
     if (net_flow_ble_) {
         return net_ble_scanner_.results().size();
@@ -990,6 +1105,15 @@ size_t BaseViewModel::net_peer_count() const {
 
 std::string BaseViewModel::net_peer_label(size_t index) const {
     char text[96];
+    if (net_flow_lora_) {
+        if (!net_lora_link_ || index >= net_lora_link_->peers().size()) {
+            return {};
+        }
+        const auto& peer = net_lora_link_->peers()[index];
+        std::snprintf(text, sizeof(text), "%s  %d dBm", peer.host_name.c_str(),
+                      static_cast<int>(peer.rssi_dbm));
+        return text;
+    }
 #if BATTLESHIP_BLE
     if (net_flow_ble_) {
         const auto& results = net_ble_scanner_.results();
@@ -1038,6 +1162,35 @@ bool BaseViewModel::net_connect_to(const std::string& ip, uint16_t port) {
 }
 
 void BaseViewModel::join_host_at(size_t index) {
+    if (net_flow_lora_) {
+        if (!net_lora_link_ || net_session_ || index >= net_lora_link_->peers().size()) {
+            return;
+        }
+        // Copy: the peers vector belongs to the link and changes on poll.
+        const auto peer = net_lora_link_->peers()[index];
+        if (!net_lora_link_->join(peer.session_id, net_lora_now_ms())) {
+            net_status_subject_.set(i18n::tr(i18n::StrId::NetCouldNotStartConnection));
+            return;  // stay on the join list; user can retry/cancel
+        }
+        net_lora_transport_ = std::make_unique<battleship::net::lora::LoRaTransport>(
+            *net_lora_link_, &BaseViewModel::net_lora_now_ms);
+        net_is_host_ = false;
+        net_session_ = std::make_unique<battleship::net::NetSession>(
+            *net_lora_transport_, battleship::net::SessionRole::Client, rng_(),
+            battleship::net::lora::lora_session_config());
+        net_seen_change_counter_ = 0;
+        net_seen_phase_ = battleship::net::SessionPhase::Handshake;
+
+        net_status_subject_.set(
+            i18n::trf(i18n::StrId::NetLobbyConnectingToBle, peer.host_name.c_str()).c_str());
+
+        if (!net_poll_timer_) {
+            net_poll_timer_ =
+                lv_timer_create(&BaseViewModel::net_poll_timer_cb, kNetPollIntervalMs, this);
+        }
+        show_page(model::AppPage::NetLobby);
+        return;
+    }
 #if BATTLESHIP_BLE
     if (net_flow_ble_) {
         const auto& results = net_ble_scanner_.results();
@@ -1135,6 +1288,10 @@ void BaseViewModel::teardown_network() {
     net_discovering_ = false;
     net_session_.reset();
     net_transport_.reset();
+    // LoRa after the session (which references the transport).
+    net_lora_begin_close();
+    net_flow_lora_ = false;
+    net_lora_seen_state_ = battleship::net::lora::LinkState::Idle;
 #if BATTLESHIP_BLE
     net_ble_scanner_.stop();
     net_ble_scanning_ = false;
@@ -1151,6 +1308,107 @@ void BaseViewModel::teardown_network() {
         // outside a network flow never see Network with a null session.
         match_mode_ = MatchMode::Hotseat;
     }
+}
+
+uint64_t BaseViewModel::net_lora_now_ms() {
+    using namespace std::chrono;
+    return static_cast<uint64_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+bool BaseViewModel::net_lora_open() {
+    using battleship::net::lora::RadioInitError;
+    // Never two radios at once: a previous flow's BYE drain ends here.
+    net_lora_finish_closing();
+    release_radio(net_lora_radio_);
+
+    auto handle = battleship::net::lora::open_radio(battleship::net::lora::default_radio_backend());
+    if (!handle.radio || !handle.radio->ready()) {
+        // open_radio() has already released any power it switched on when it
+        // returns no radio; a radio object that is not ready is destroyed
+        // here (radio first, then power).
+        const RadioInitError error =
+            handle.error != RadioInitError::None ? handle.error : RadioInitError::ConfigFailed;
+        release_radio(handle);
+        std::printf("[lora] radio open failed (error %d)\n", static_cast<int>(error));
+        net_lora_show_error(lora_error_message(error));
+        return false;
+    }
+    std::printf("[lora] radio opened (%s)\n",
+                battleship::net::lora::default_radio_backend() ==
+                        battleship::net::lora::RadioBackend::Hardware
+                    ? "hardware"
+                    : "udp-sim");
+    net_lora_radio_ = std::move(handle);  // target is empty: nothing destroyed
+    net_lora_link_ = std::make_unique<battleship::net::lora::LoRaLink>(
+        *net_lora_radio_.radio, battleship::net::lora::Japan920Policy{}, rng_());
+    net_lora_seen_state_ = battleship::net::lora::LinkState::Idle;
+    net_flow_lora_ = true;
+    return true;
+}
+
+void BaseViewModel::net_lora_show_error(i18n::StrId message) {
+    net_status_subject_.set(i18n::tr(message));
+    show_page(model::AppPage::NetError);
+}
+
+void BaseViewModel::net_lora_begin_close() {
+    using battleship::net::lora::LinkState;
+    if (!net_lora_link_) {
+        net_lora_transport_.reset();
+        release_radio(net_lora_radio_);
+        return;
+    }
+    const uint64_t now = net_lora_now_ms();
+    const bool was_connected = net_lora_link_->state() == LinkState::Connected;
+    if (was_connected) {
+        // Give frames the session queued just before teardown (e.g. the
+        // GAME_OVER from NetSession::abandon) one chance to start on air;
+        // close() then drops anything still queued and queues the BYE.
+        net_lora_link_->poll(now);
+    }
+    net_lora_link_->close(now);
+
+    if (!was_connected || !net_lora_radio_.radio || !net_lora_radio_.radio->ready()) {
+        // No BYE pending (or no radio left to send it): destroy right away.
+        net_lora_transport_.reset();
+        net_lora_link_.reset();
+        release_radio(net_lora_radio_);
+        return;
+    }
+
+    net_lora_finish_closing();  // at most one draining set at a time
+    net_lora_closing_ = std::make_unique<LoraClosing>();
+    net_lora_closing_->radio = std::move(net_lora_radio_);  // target empty
+    net_lora_closing_->link = std::move(net_lora_link_);
+    net_lora_closing_->transport = std::move(net_lora_transport_);
+    net_lora_closing_->deadline_ms = now + kLoraCloseDrainMs;
+    net_lora_closing_timer_ =
+        lv_timer_create(&BaseViewModel::net_lora_closing_timer_cb, kLoraClosePollMs, this);
+}
+
+void BaseViewModel::net_lora_finish_closing() {
+    if (net_lora_closing_timer_) {
+        lv_timer_delete(net_lora_closing_timer_);
+        net_lora_closing_timer_ = nullptr;
+    }
+    if (net_lora_closing_) {
+        net_lora_closing_.reset();  // transport -> link -> radio -> Cap power
+        std::printf("[lora] radio released (after BYE drain)\n");
+    }
+}
+
+void BaseViewModel::net_lora_closing_timer_cb(lv_timer_t* timer) {
+    auto* self = static_cast<BaseViewModel*>(lv_timer_get_user_data(timer));
+    if (!self || !self->net_lora_closing_) {
+        return;
+    }
+    const uint64_t now = net_lora_now_ms();
+    if (now >= self->net_lora_closing_->deadline_ms) {
+        self->net_lora_finish_closing();  // deletes this timer (safe in LVGL 9)
+        return;
+    }
+    self->net_lora_closing_->link->poll(now);
 }
 
 void BaseViewModel::net_poll_timer_cb(lv_timer_t* timer) {
@@ -1194,8 +1452,45 @@ void BaseViewModel::net_poll() {
         }
     }
 #endif
+    if (net_lora_link_ && !net_session_) {
+        // Scanning (no session yet): drive the link directly. Once a session
+        // exists, NetSession::poll drives it through LoRaTransport::poll.
+        net_lora_link_->poll(net_lora_now_ms());
+    }
+    if (net_lora_link_ && net_lora_link_->state() == battleship::net::lora::LinkState::Scanning) {
+        // Same change detection as above over the LoRa beacon peers. RSSI is
+        // part of the label, so it is part of the signature too (the Join
+        // screen keeps keyboard focus on the same row across rebuilds).
+        const auto& peers = net_lora_link_->peers();
+        size_t signature = peers.size() * 1000003u;
+        for (const auto& peer : peers) {
+            signature = signature * 31u + std::hash<std::string>{}(peer.host_name) +
+                        peer.session_id * 131u + static_cast<size_t>(peer.rssi_dbm + 200);
+        }
+        if (signature != net_hosts_signature_) {
+            net_hosts_signature_ = signature;
+            net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
+        }
+    }
     if (net_session_) {
         net_session_->poll(now);
+    }
+    if (net_lora_link_) {
+        using battleship::net::lora::LinkState;
+        const LinkState state = net_lora_link_->state();
+        if (state == LinkState::Failed) {
+            // Join attempts exhausted (radio still fine) reads as a failed
+            // connection attempt; anything else is a radio/policy failure.
+            const bool join_gave_up = net_lora_seen_state_ == LinkState::Joining &&
+                                      net_lora_radio_.radio && net_lora_radio_.radio->ready();
+            teardown_network();  // releases radio + Cap power (no BYE: not Connected)
+            net_lora_show_error(join_gave_up ? i18n::StrId::NetCouldNotStartConnection
+                                             : i18n::StrId::NetLoraUnavailable);
+            return;
+        }
+        net_lora_seen_state_ = state;
+    }
+    if (net_session_) {
         net_sync_session_state();
         if (net_autopilot_mode_ != 0) {
             net_autopilot_step();

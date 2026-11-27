@@ -15,7 +15,8 @@ namespace model {
 /// -> Battle (no handovers; the AI fires automatically on its turn) ->
 /// Result.
 /// Network play (Phase 4; connection-type select added in Phase 6):
-/// Menu -> NetTransport (BLE default / WiFi / LoRa disabled) -> NetworkMenu
+/// Menu -> NetTransport (BLE default / WiFi / LoRa [-> NetAntennaConfirm the
+/// first time]) -> NetworkMenu
 /// -> (Host: NetLobby | Join: NetJoin [-> NetDirectIp, WiFi only] ->
 /// NetLobby) -> Placement -> Battle -> Result; NetError interrupts from
 /// anywhere on disconnect.
@@ -36,6 +37,7 @@ enum class AppPage {
     NetError    = 10, ///< "connection lost" dialog -> back to title
     Settings    = 11, ///< language selection (Phase 5)
     NetTransport = 12, ///< connection-type select: BLE (default) / WiFi / LoRa (Phase 6)
+    NetAntennaConfirm = 13, ///< one-time "antenna attached?" check before LoRa (Phase 8)
 };
 
 class BaseModel {

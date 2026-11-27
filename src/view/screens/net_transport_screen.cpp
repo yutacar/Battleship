@@ -27,13 +27,15 @@ using i18n::tr;
 struct TransportEntry {
     StrId label;
     NetTransportPref pref;   ///< meaningful only when selectable
-    bool selectable;         ///< LoRa row is a pure placeholder until Phase 8
+    bool selectable;         ///< false renders a disabled "(Coming soon)" row
 };
 
 constexpr std::array<TransportEntry, 3> kTransportEntries = {{
     {StrId::NetTransportBle, NetTransportPref::Ble, true},    // default, top row
     {StrId::NetTransportWifi, NetTransportPref::Wifi, true},
-    {StrId::NetTransportLora, NetTransportPref::Wifi, false}, // disabled placeholder
+    // Phase 8: enabled on every build, independent of the BLE device-only
+    // gating below (desktop builds use the UDP radio simulator).
+    {StrId::NetTransportLora, NetTransportPref::Lora, true},
 }};
 
 void select_cb(lv_event_t* event) {

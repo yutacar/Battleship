@@ -17,6 +17,8 @@
 #include "i18n/fonts.h"
 #include "i18n/settings.h"
 
+#include <csignal>
+
 #if !USE_DESKTOP
 #include <cstdlib>
 #if APP_USE_DRM
@@ -142,6 +144,31 @@ void push_synthetic_key(const std::string& name) {
     lv_sdl_keyboard_handler(&event);
 }
 #endif
+
+// ---- Signal-initiated exit (SIGTERM / SIGINT / SIGHUP) ----
+// Without a handler these signals terminate the process on the spot (on the
+// desktop SDL build, SDL's own handler turns them into SDL_QUIT, which
+// LVGL's SDL driver answers with exit(0)) -- either way no destructor runs,
+// so BaseViewModel::teardown_network() never closes the network session and
+// the Cap LoRa-1262 5V output (CapPower) is never switched off. The handler
+// only records the request; the main loop turns it into the same safe-quit
+// path long Esc uses (request_safe_quit -> quit_requested -> normal return
+// from run(), destructors included).
+volatile std::sig_atomic_t g_quit_signal = 0;
+
+extern "C" void quit_signal_handler(int signal_number) {
+    g_quit_signal = signal_number;
+}
+
+void install_quit_signal_handlers() {
+    struct sigaction action {};
+    action.sa_handler = quit_signal_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    for (const int signal_number : {SIGTERM, SIGINT, SIGHUP}) {
+        sigaction(signal_number, &action, nullptr);
+    }
+}
 
 void quit_requested_observer(lv_observer_t* observer, lv_subject_t* subject) {
     auto* running = static_cast<bool*>(lv_observer_get_user_data(observer));
@@ -301,6 +328,9 @@ int Application::run() {
     auto* quit_observer = lv_subject_add_observer(view_model.quit_requested_subject(),
                                                   quit_requested_observer,
                                                   &running);
+    // Installed after init_display() so it replaces SDL's SIGINT/SIGTERM
+    // handler on the desktop build (see quit_signal_handler).
+    install_quit_signal_handlers();
 
 #if USE_DESKTOP && LV_USE_SDL
     SDL_AddEventWatch(screenshot_key_watch, nullptr);
@@ -424,7 +454,14 @@ int Application::run() {
 
     LOG_INFO("LVGL app started at {}x{}", lv_display_get_horizontal_resolution(display),
              lv_display_get_vertical_resolution(display));
+    bool quit_signal_handled = false;
     while (running) {
+        if (g_quit_signal != 0 && !quit_signal_handled) {
+            quit_signal_handled = true;
+            LOG_INFO("signal {} received: quitting", static_cast<int>(g_quit_signal));
+            view_model.request_safe_quit();  // abandons/tears down network, sets quit_requested
+            continue;  // `running` is now false: leave the loop without another frame
+        }
         lv_timer_handler();
 
 #if USE_DESKTOP && LV_USE_SDL
