@@ -68,6 +68,19 @@ const char* init_error_name(RadioInitError e) {
     return "?";
 }
 
+const char* busy_reason_name(BusyReason r) {
+    switch (r) {
+    case BusyReason::None: return "None";
+    case BusyReason::Transmitting: return "Transmitting";
+    case BusyReason::RxInProgress: return "RxInProgress";
+    case BusyReason::RxDonePending: return "RxDonePending";
+    case BusyReason::PendingIrq: return "PendingIrq";
+    case BusyReason::CarrierIrq: return "CarrierIrq";
+    case BusyReason::CarrierRssi: return "CarrierRssi";
+    }
+    return "?";
+}
+
 std::string read_brightness() {
     std::string out = "unreadable";
     if (FILE* f = std::fopen(kCapPowerPath, "r")) {
@@ -121,6 +134,7 @@ struct Link {
     Japan920Policy policy;
     std::deque<Rx> rxq;
     unsigned busy = 0;
+    unsigned busy_by_reason[7] = {};
     unsigned sent = 0;
     std::vector<double> tx_start_us;
     std::vector<double> rx_rearm_us;
@@ -168,6 +182,14 @@ struct Link {
             }
             if (s == RadioStart::Busy) {
                 ++busy;
+                {
+                    const auto reason = radio.last_busy_reason();
+                    ++busy_by_reason[static_cast<int>(reason)];
+                    std::printf("  busy: reason=%s rssi_dbm=%d sample=%u us_since_rearm=%u irq=0x%04x\n",
+                                busy_reason_name(reason), radio.last_busy_rssi_dbm(),
+                                radio.last_busy_sample_index(), radio.last_busy_us_since_rearm(),
+                                radio.last_busy_irq());
+                }
                 if (busy_here) ++*busy_here;
                 sleep_ms(4);
                 continue;
@@ -304,6 +326,9 @@ int cmd_ping(int count) {
     std::printf("rtt_ms min %.1f median %.1f max %.1f\n", vmin(rtts), median(rtts), vmax(rtts));
     std::printf("rssi_dbm median %.1f\n", median(rssis));
     std::printf("busy_count %u\n", link.busy);
+    for (int i = 1; i < 7; ++i)
+        std::printf("  busy_reason %s %u\n", busy_reason_name(static_cast<BusyReason>(i)),
+                    link.busy_by_reason[i]);
     std::printf("last_tx_start_us median %.0f max %.0f\n", median(link.tx_start_us), vmax(link.tx_start_us));
     std::printf("last_rx_rearm_us median %.0f max %.0f\n", median(link.rx_rearm_us), vmax(link.rx_rearm_us));
     return 0;

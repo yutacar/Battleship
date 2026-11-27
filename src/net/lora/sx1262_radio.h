@@ -21,6 +21,11 @@
 
 namespace battleship::net::lora {
 
+// Why the last try_start_transmit returned Busy (diagnostics only).
+enum class BusyReason {
+    None, Transmitting, RxInProgress, RxDonePending, PendingIrq, CarrierIrq, CarrierRssi
+};
+
 struct Sx1262Config {
     // CardputerZero EXT uses SPI0 CS1 for the Zero-compatible Cap orientation.
     std::string spi_device = "/dev/spidev0.1";
@@ -54,6 +59,12 @@ public:
 
     // Diagnostics (lora_probe): SX1262 ReadRegister (0x1D).
     bool read_register(std::uint16_t addr, std::uint8_t* out, std::size_t n);
+
+    BusyReason last_busy_reason() const noexcept;
+    std::int16_t last_busy_rssi_dbm() const noexcept;      // CarrierRssi sample
+    std::uint32_t last_busy_sample_index() const noexcept; // 0 = first CS sample
+    std::uint32_t last_busy_us_since_rearm() const noexcept;
+    std::uint16_t last_busy_irq() const noexcept;          // raw IRQ word
 
     bool ready() const override;
     RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) override;

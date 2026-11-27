@@ -402,6 +402,7 @@ struct Sx1262Radio::Impl {
         const auto t0 = Clock::now();
         const bool ok = start_receive_untimed();
         last_rx_rearm_us = elapsed_us(t0);
+        rearm_end = Clock::now();
         return ok;
     }
 
@@ -583,6 +584,7 @@ struct Sx1262Radio::Impl {
     // packet in progress, means Busy. The radio is in continuous RX here.
     RadioStart carrier_sense() noexcept {
         const auto end = Clock::now() + std::chrono::milliseconds(config.carrier_sense_ms);
+        std::uint32_t sample_index = 0U;
         for (;;) {
             bool irq_high = false;
             std::uint8_t raw_rssi = 0U;
@@ -590,9 +592,13 @@ struct Sx1262Radio::Impl {
                 !read_command(kGetRssiInst, nullptr, 0U, &raw_rssi, 1U)) {
                 return fault_tx();
             }
-            if (irq_high || sx1262_carrier_busy(raw_rssi, config.lbt_threshold_dbm)) {
-                return RadioStart::Busy;
+            if (irq_high) {
+                return busy(BusyReason::CarrierIrq, 0U, sx1262_rssi_dbm(raw_rssi), sample_index);
             }
+            if (sx1262_carrier_busy(raw_rssi, config.lbt_threshold_dbm)) {
+                return busy(BusyReason::CarrierRssi, 0U, sx1262_rssi_dbm(raw_rssi), sample_index);
+            }
+            ++sample_index;
             if (Clock::now() >= end) {
                 return RadioStart::Started;
             }
@@ -611,8 +617,9 @@ struct Sx1262Radio::Impl {
         if (!ready() || !data || size == 0U || size > kMaxRadioPacket) {
             return RadioStart::Failed; // caller error / already faulted: no new latch
         }
+        busy_reason = BusyReason::None;
         if (transmitting) {
-            return RadioStart::Busy;
+            return busy(BusyReason::Transmitting);
         }
 
         bool irq_high = false;
@@ -620,11 +627,14 @@ struct Sx1262Radio::Impl {
         if (!gpio_get(irq_descriptor, irq_high) || !read_irq(irq)) {
             return fault_tx();
         }
-        if (rx_in_progress(irq) || (irq & kIrqRxDone) != 0U) {
-            return RadioStart::Busy;
+        if (rx_in_progress(irq)) {
+            return busy(BusyReason::RxInProgress, irq);
+        }
+        if ((irq & kIrqRxDone) != 0U) {
+            return busy(BusyReason::RxDonePending, irq);
         }
         if (irq_high && (irq & kReceiveIrqs & ~kRxInProgressIrqs) != 0U) {
-            return RadioStart::Busy; // pending event; poll() will service it
+            return busy(BusyReason::PendingIrq, irq); // poll() will service it
         }
         const RadioStart sensed = carrier_sense();
         if (sensed != RadioStart::Started) {
@@ -766,6 +776,22 @@ struct Sx1262Radio::Impl {
     bool faulted{false};
     std::uint32_t last_tx_start_us{0};
     std::uint32_t last_rx_rearm_us{0};
+    Clock::time_point rearm_end{};
+    BusyReason busy_reason{BusyReason::None};
+    std::int16_t busy_rssi_dbm{0};
+    std::uint32_t busy_sample_index{0};
+    std::uint32_t busy_us_since_rearm{0};
+    std::uint16_t busy_irq{0};
+
+    RadioStart busy(BusyReason reason, std::uint16_t irq = 0U, std::int16_t rssi = 0,
+                    std::uint32_t sample = 0U) noexcept {
+        busy_reason = reason;
+        busy_irq = irq;
+        busy_rssi_dbm = rssi;
+        busy_sample_index = sample;
+        busy_us_since_rearm = elapsed_us(rearm_end);
+        return RadioStart::Busy;
+    }
     bool closed{false};
     bool rx_in_progress_since_valid{false};
     Clock::time_point rx_in_progress_since{};
@@ -790,6 +816,22 @@ std::uint32_t Sx1262Radio::last_rx_rearm_us() const noexcept {
 
 bool Sx1262Radio::read_register(std::uint16_t addr, std::uint8_t* out, std::size_t n) {
     return impl_ && out != nullptr && n > 0U && impl_->read_register(addr, out, n);
+}
+
+BusyReason Sx1262Radio::last_busy_reason() const noexcept {
+    return impl_ ? impl_->busy_reason : BusyReason::None;
+}
+std::int16_t Sx1262Radio::last_busy_rssi_dbm() const noexcept {
+    return impl_ ? impl_->busy_rssi_dbm : 0;
+}
+std::uint32_t Sx1262Radio::last_busy_sample_index() const noexcept {
+    return impl_ ? impl_->busy_sample_index : 0U;
+}
+std::uint32_t Sx1262Radio::last_busy_us_since_rearm() const noexcept {
+    return impl_ ? impl_->busy_us_since_rearm : 0U;
+}
+std::uint16_t Sx1262Radio::last_busy_irq() const noexcept {
+    return impl_ ? impl_->busy_irq : 0U;
 }
 
 bool Sx1262Radio::ready() const { return impl_ && impl_->ready(); }
