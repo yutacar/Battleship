@@ -37,6 +37,7 @@ add_executable(battleship_core_tests
     test_lora_packet.cpp
     test_lora_link.cpp
     test_lora_transport.cpp
+    test_lora_cap_power.cpp
     support/fake_radio_bus.cpp
     support/net_game_driver.cpp
     test_i18n_catalog.cpp
