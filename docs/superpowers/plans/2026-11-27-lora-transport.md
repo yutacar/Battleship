@@ -67,7 +67,7 @@
 - Produces（namespace `battleship::net::lora`）:
   - `using RadioTick = uint64_t;`
   - `struct Japan920Profile { uint32_t frequency_hz = 921'800'000; uint32_t bandwidth_hz = 125'000; uint8_t spreading_factor = 7; uint8_t coding_rate_denominator = 5; uint8_t transmit_power_dbm = 13; uint16_t preamble_symbols = 8; uint8_t sync_word = 0x12; bool valid() const noexcept; };`
-  - `struct Japan920PolicyConfig { Japan920Profile profile; RadioTick minimum_gap_ms = 100; RadioTick bucket_capacity_ms = 6000; uint32_t refill_denominator = 10; };`
+  - `struct Japan920PolicyConfig { Japan920Profile profile; RadioTick pause_after_emission_ms = 50; };`（2026-11-27 改訂: 旧 minimum_gap/bucket/refill は廃止）``
   - `enum class TxDecisionStatus { Allowed, Deferred, Locked, Invalid };  struct TxDecision { TxDecisionStatus status; RadioTick not_before_ms; };`
   - `class Japan920Policy { explicit Japan920Policy(Japan920PolicyConfig = {}); TxDecision evaluate(RadioTick now_ms, size_t bytes); void record(RadioTick now_ms, size_t bytes); RadioTick airtime_ms(size_t bytes) const; bool valid() const; };`
   - CMake: `option BATTLESHIP_LORA_HW`（Linux 既定 ON / それ以外 OFF）、`battleship_net` に PUBLIC 定義 `BATTLESHIP_LORA_HW=$<BOOL:...>`
@@ -78,7 +78,7 @@
   - `TEST(LoraPolicy, RejectsIllegalProfiles)`: 868'000'000Hz、14dBm、帯域 250kHz、923'000'000Hz（上端はみ出し）、同期ワード 0x34 → それぞれ `valid()==false`
   - `TEST(LoraPolicy, AirtimeSf7)`: `airtime_ms(18)` が 41〜52 ms、`airtime_ms(65)` が 110〜135 ms
   - `TEST(LoraPolicy, MinimumGapDefers)`: t=0 で 18B を record → t=50 で evaluate が `Deferred` かつ `not_before_ms==100`
-  - `TEST(LoraPolicy, BucketLimitsLongTermDuty)`: 18B を 100ms 間隔で連続 record し続けると、累計送信時間がバケット容量 6000ms を超える前に `Deferred` が返る
+  - （改訂）`PauseIsMeasuredFromEmissionEnd` / `NoHourlyCapOnCh24to32` / `AirtimeOfLargestPacketBelowLimit` に置き換え
 - [ ] **Step 3:** `tests/CMakeLists.txt` に追加しビルド → 失敗を確認  
   Run: `cmake --build build/desktop && ctest --test-dir build/desktop -R LoraPolicy`（既存のデスクトップビルドディレクトリ名に合わせる）  Expected: リンク/コンパイルエラー
 - [ ] **Step 4:** LM の `japan_920_radio_policy.{h,cpp}` を移植（namespace・型名を上記に、既定値を上記に変更、`ports::` 依存を除去）
