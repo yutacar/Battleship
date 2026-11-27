@@ -254,6 +254,20 @@ TEST(LoraUdpSim, UdpSimTwoInstancesExchange) {
     UdpSimRadio ra(0.0, kPort);
     UdpSimRadio rb(0.0, kPort);
     if (!ra.ready() || !rb.ready()) GTEST_SKIP() << "multicast socket unavailable";
+    {
+        // Environmental probe: skip only if a raw datagram never arrives.
+        const uint8_t probe[] = {0xAA};
+        ASSERT_EQ(ra.try_start_transmit(probe, 1), RadioStart::Started);
+        uint8_t buf[kMaxRadioPacket];
+        bool arrived = false;
+        for (int i = 0; i < 250 && !arrived; ++i) {
+            arrived = rb.poll(buf, sizeof(buf)).event == RadioEvent::Received;
+            if (!arrived) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (!arrived) GTEST_SKIP() << "multicast loopback delivery unavailable";
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // let TxDone come due
+        while (ra.poll(buf, sizeof(buf)).event != RadioEvent::Idle) {}
+    }
 
     LoRaLink host(ra, Japan920Policy{}, 11);
     LoRaLink joiner(rb, Japan920Policy{}, 22);
@@ -284,7 +298,7 @@ TEST(LoraUdpSim, UdpSimTwoInstancesExchange) {
         if (joiner.take_received(in_j) > 0) joiner_got = true;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    if (!joined_called) GTEST_SKIP() << "no multicast loopback delivery in this environment";
+    ASSERT_TRUE(joined_called) << "scan never discovered the host";
     EXPECT_EQ(host.state(), LinkState::Connected);
     EXPECT_EQ(joiner.state(), LinkState::Connected);
     ASSERT_TRUE(host_got);
@@ -303,4 +317,21 @@ TEST(LoraUdpSim, FactoryHardwareUnavailableOrSim) {
     EXPECT_EQ(hw.radio, nullptr);
     EXPECT_EQ(hw.error, RadioInitError::SpiOpenFailed);
 #endif
+}
+
+TEST(LoraUdpSim, DoesNotReceiveOwnPacket) {
+    UdpSimRadio r(0.0, 35362);
+    if (!r.ready()) GTEST_SKIP() << "multicast socket unavailable";
+    const uint8_t p[] = {1, 2, 3};
+    ASSERT_EQ(r.try_start_transmit(p, 3), RadioStart::Started);
+    EXPECT_EQ(r.try_start_transmit(p, 3), RadioStart::Busy);
+    uint8_t buf[kMaxRadioPacket];
+    bool tx_done = false;
+    for (int i = 0; i < 100; ++i) {
+        RadioPoll rp = r.poll(buf, sizeof(buf));
+        ASSERT_NE(rp.event, RadioEvent::Received);
+        if (rp.event == RadioEvent::TxDone) tx_done = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+    EXPECT_TRUE(tx_done);
 }

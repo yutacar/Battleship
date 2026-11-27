@@ -41,14 +41,17 @@ UdpSimRadio::UdpSimRadio(double loss_rate, std::uint16_t port)
     addr.sin_port = htons(port_);
     ip_mreq mreq{};
     mreq.imr_multiaddr.s_addr = inet_addr(kGroup);
-    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    mreq.imr_interface.s_addr = htonl(INADDR_LOOPBACK);
     unsigned char loop = 1;
-    unsigned char ttl = 1;
+    unsigned char ttl = 0; // never leaves this host
+    in_addr loif{};
+    loif.s_addr = htonl(INADDR_LOOPBACK);
     int flags = ::fcntl(fd, F_GETFL, 0);
     if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
         ::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) != 0 ||
         ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) != 0 ||
-        ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != 0 || flags < 0 ||
+        ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != 0 ||
+        ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &loif, sizeof(loif)) != 0 || flags < 0 ||
         ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
         ::close(fd);
         return;
