@@ -1178,8 +1178,9 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
   （コンパイル時）+ `NetMessages.EveryEncodedFrameFitsOneBleWriteAtDefaultMtu`
   テスト（実 encode の実測）で二重に固定した。受信側はどんなチャンクで
   届いても既存 `FrameDecoder` が再同期するので、通知の分断/結合にも元々耐性がある。
-- **Just Works（明記）**: ペアリング/ボンディングは要求せず、リンク暗号化は
-  スコープ外。プロトコルは座標と結果しか運ばず盤面情報を送らない設計
+- **ペアリング（§13.6.1）**: アプリ自体はペアリングを要求しないが、MIDI 起因の
+  SMP ペアリングをアプリ内 Agent1 が自動承認するため、実機では初回接続で
+  ボンドされ、2回目以降はそのボンドでリンクが暗号化される。プロトコルは座標と結果しか運ばず盤面情報を送らない設計
   （§11.1）なので、傍受されても相手プレイヤーが画面で見る以上の情報は漏れない。
 - **スレッドモデル**: 他のトランスポート同様、完全シングルスレッド poll 駆動。
   `poll()` = `sd_bus_process()` の非ブロッキング排出。ブロッキング呼び出しは
@@ -1321,10 +1322,29 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
   2回目以降はペアリング不要。アプリは pi ユーザ（bluetooth グループ外）だが、
   D-Bus ポリシー上 default context から org.bluez 宛の送信は可能で登録できる。
   手動で bluetoothctl の agent により両機をボンドした後は双方向で対戦成功。
-- **WiFi 2.4 GHz 共存（既知リスク）**: ペアリング問題の解決前の試行の一部で、WiFi
-  有効時に supervision timeout（既定 420 ms）によるリンク断が発生した。ペアリング
-  解決後は WiFi 有効のまま短時間のテストで対戦成功。長時間・混雑環境での安定性は
-  未確認の既知リスクとして残す。
+  **アプリ内 agent による自動ペアリングは 2026-11-28 に実機で検証済み**
+  （初回接続でペアリング = User Confirmation に positive reply・LTK 保存、
+  2回目以降はボンドで暗号化接続しペアリングなし）。
+  Agent の RequestConfirmation / RequestAuthorization は、ジョイナでは接続先
+  デバイス（device_path）以外を Rejected にし、ホストは相手を事前に知り得ないため
+  任意のデバイスを承認する。
+- **WiFi 2.4 GHz 共存（実機確認済みの問題）**: コンボチップは WiFi と BT で
+  アンテナを1本共有しており、BlueZ 既定の LE supervision timeout（420 ms）では
+  WiFi 接続中はほぼ毎回 1〜3 秒以内にリンクが切れる（HCI reason 0x08）。WiFi オフ
+  でも、ペアリング直後などに時折発生する。最初の数秒を生き延びたリンクでは
+  対戦を最後まで完走できた。システム設定（supervision timeout 等）は変更しない方針で、
+  次の緩和策をアプリ側に入れた:
+  - **ジョイナの自動リトライ**: 接続確立前（Connecting）にリンク断または Connect
+    失敗が起きたら、1000 ms 待って `Device1.Connect` を最大2回再試行（計3回、
+    `kBleConnectAttempts` / `kBleRetryDelayMs`、判定は `ble_handshake_policy.h`）。
+    15 秒のハンドシェイクタイムアウトは1回ごと。Connected 後の切断は従来どおり
+    即失敗（試合中のリトライなし）。ホスト側は変更なし（ロビーで待ち続ける）。
+  - **ヒント表示**: BLE 対戦で接続エラーになった場合、NetError 画面に
+    「WiFiをオフにするとBluetooth対戦が安定します」を追記して表示する
+    （`NetErrorConnectionLostBle`、LoRa は従来の文言）。
+  - **復旧**: 片方の機体にだけボンドが残っている（相手側で削除した）場合は、
+    もう一方でも古いボンドを削除する（`bluetoothctl remove <addr>`）。その後に
+    再度対戦する。
 
 ### 13.7 既知の制約
 
@@ -1332,7 +1352,8 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
   ロジック（フレーミング/信頼性/セッション）は Loopback で全テスト済みのため、
   残リスクは BlueZ 連携部分（register/advertise/subscribe の実挙動）に限定
   （PLAN.md リスク表どおり）。実機2台での §13.6 が最終検証。
-- Just Works・リンク暗号化なし（意図したスコープ、§13.1）。
+- アプリ層に独自の暗号化・認証は無い（リンク暗号化は初回ペアリング後のボンド頼み。
+  アプリ内 Agent1 が自動承認、§13.6.1）。
 - BLE には Direct IP に相当する手動フォールバック入力が無い（スキャンのみ）。
 - 再接続/再戦同期は WiFi 版と同じく将来課題（切断 = セッション終了）。
 
@@ -1722,8 +1743,10 @@ persisted except UI language/transport preference, in a local config
 file.
 
 ## Known limitations
-- BLE has no encryption (Just Works pairing, no bonding) -- intentional
-  scope for a LAN-local casual 2-player game.
+- BLE adds no app-level encryption/authentication. The in-app BlueZ agent
+  auto-accepts pairing, so the first match bonds the two units and later
+  links are encrypted with that bond (NOTES.md 13.6.1) -- intentional scope
+  for a casual 2-player game.
 - BLE reconnection after a mid-match disconnect is not supported
   (matches WiFi's existing behavior: disconnect ends the match).
 - LoRa transport is designed but not implemented (Phase 8, future).

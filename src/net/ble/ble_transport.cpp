@@ -380,8 +380,63 @@ struct BleTransport::Impl {
     bool char_query_in_flight = false;
     bool start_notify_sent = false;
     uint64_t last_resolve_poll_us = 0;
-    uint64_t start_ms = 0;               ///< start_join() time (handshake timeout)
+    uint64_t start_ms = 0;               ///< current attempt's Connect time (handshake timeout)
     bool link_confirmed = false;         ///< Connect reply ok or Connected=true seen
+    int attempt = 0;                     ///< Connect attempts issued so far (joiner)
+    bool retry_pending = false;          ///< waiting out kBleRetryDelayMs before next attempt
+    uint64_t retry_failed_ms = 0;        ///< when the failed attempt was noticed
+    bool connect_in_flight = false;      ///< Connect call issued, reply not yet seen
+    sd_bus_slot* tx_match_slot = nullptr;  ///< match on peer TX char (owned; dropped per attempt)
+
+    /// Joiner: drops all per-attempt pipeline state (not the device match).
+    void reset_attempt_state() {
+        services_resolved = false;
+        resolve_query_in_flight = false;
+        char_query_in_flight = false;
+        start_notify_sent = false;
+        link_confirmed = false;
+        rx_char_path.clear();
+        tx_char_path.clear();
+        if (tx_match_slot) {
+            sd_bus_slot_unref(tx_match_slot);
+            tx_match_slot = nullptr;
+        }
+    }
+
+    /// Joiner: issues Device1.Connect for a new attempt. False on send error.
+    bool issue_connect() {
+        reset_attempt_state();
+        ++attempt;
+        start_ms = monotonic_ms();
+        connect_in_flight = sd_bus_call_method_async(bus, nullptr, kBluez, device_path.c_str(),
+                                                     kDeviceIface, "Connect", &connect_reply_cb,
+                                                     this, "") >= 0;
+        return connect_in_flight;
+    }
+
+    /// The current attempt failed (link lost / Connect error / timeout).
+    /// While still Connecting and attempts remain: schedule a retry; else
+    /// fail() as before (also for any loss after Connected).
+    void attempt_failed(bool teardown_link) {
+        if (state != TransportState::Connecting || role != Role::Join) {
+            fail();
+            return;
+        }
+        if (retry_pending) {
+            return;  // already scheduled (duplicate signal / stale reply)
+        }
+        if (!ble_should_retry(attempt)) {
+            fail();
+            return;
+        }
+        if (teardown_link) {
+            sd_bus_call_method_async(bus, nullptr, kBluez, device_path.c_str(), kDeviceIface,
+                                     "Disconnect", nullptr, nullptr, "");
+        }
+        reset_attempt_state();
+        retry_pending = true;
+        retry_failed_ms = monotonic_ms();
+    }
 
     std::vector<uint8_t> recv_buffer;
 
@@ -420,6 +475,10 @@ struct BleTransport::Impl {
                                          "UnregisterAgent", nullptr, nullptr, "o", kAgentPath);
             }
             sd_bus_flush(bus);
+            if (tx_match_slot) {
+                sd_bus_slot_unref(tx_match_slot);
+                tx_match_slot = nullptr;
+            }
             sd_bus_unref(bus);  // floating slots (vtables/matches/async) die with the bus
             bus = nullptr;
         }
@@ -435,6 +494,10 @@ struct BleTransport::Impl {
         start_notify_sent = false;
         start_ms = 0;
         link_confirmed = false;
+        attempt = 0;
+        retry_pending = false;
+        retry_failed_ms = 0;
+        connect_in_flight = false;
         device_path.clear();
         rx_char_path.clear();
         tx_char_path.clear();
@@ -646,7 +709,7 @@ struct BleTransport::Impl {
             const bool lost_connected = has_connected && !connected && self->link_confirmed;
             if (lost_connected || ble_device_link_lost(false, false, has_resolved, resolved,
                                                        self->services_resolved)) {
-                self->fail();
+                self->attempt_failed(false);  // retries while still Connecting
             }
         }
         return 0;
@@ -656,9 +719,16 @@ struct BleTransport::Impl {
 
     static int connect_reply_cb(sd_bus_message* reply, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
-        if (sd_bus_message_is_method_error(reply, nullptr)) {
-            self->fail();
+        self->connect_in_flight = false;
+        if (self->state == TransportState::Disconnected) {
             return 0;
+        }
+        if (sd_bus_message_is_method_error(reply, nullptr)) {
+            self->attempt_failed(false);
+            return 0;
+        }
+        if (self->retry_pending) {
+            return 0;  // stale success from a dropped attempt
         }
         self->link_confirmed = true;
         // Success: keep waiting for ServicesResolved (polled from poll()).
@@ -770,10 +840,10 @@ struct BleTransport::Impl {
     static int start_notify_reply_cb(sd_bus_message* reply, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
         if (sd_bus_message_is_method_error(reply, nullptr)) {
-            self->fail();
+            self->attempt_failed(true);  // retries while still Connecting
             return 0;
         }
-        if (self->state == TransportState::Connecting) {
+        if (self->state == TransportState::Connecting && !self->retry_pending) {
             self->state = TransportState::Connected;
         }
         return 0;
@@ -808,6 +878,20 @@ struct BleTransport::Impl {
     // systems may not need pairing); classic profiles are never authorized.
 
     static int agent_ok_cb(sd_bus_message* m, void*, sd_bus_error*) {
+        return sd_bus_reply_method_return(m, "");
+    }
+
+    /// RequestConfirmation / RequestAuthorization: the joiner accepts only
+    /// its connect target; the host can't know the joiner in advance.
+    static int agent_confirm_cb(sd_bus_message* m, void* userdata, sd_bus_error*) {
+        auto* self = static_cast<Impl*>(userdata);
+        const char* dev = nullptr;
+        if (self->role == Role::Join) {
+            if (sd_bus_message_read_basic(m, 'o', &dev) < 0 || !dev ||
+                self->device_path != dev) {
+                return sd_bus_reply_method_errorf(m, "org.bluez.Error.Rejected", "Rejected");
+            }
+        }
         return sd_bus_reply_method_return(m, "");
     }
 
@@ -885,8 +969,8 @@ const sd_bus_vtable BleTransport::Impl::kAgentVtable[] = {
     SD_BUS_METHOD("DisplayPinCode", "os", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("RequestPasskey", "o", "u", agent_reject_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("DisplayPasskey", "ouq", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_confirm_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_confirm_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("AuthorizeService", "os", "", agent_reject_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("Cancel", "", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
@@ -996,7 +1080,6 @@ bool BleTransport::start_join(const std::string& device_path) {
     impl_->role = Impl::Role::Join;
     impl_->register_agent();
     impl_->device_path = device_path;
-    impl_->start_ms = monotonic_ms();
 
     // Watch the peer for link loss before issuing Connect so a drop during
     // GATT discovery cannot slip past.
@@ -1012,10 +1095,7 @@ bool BleTransport::start_join(const std::string& device_path) {
         }
     }
 
-    const int rc =
-        sd_bus_call_method_async(impl_->bus, nullptr, kBluez, device_path.c_str(), kDeviceIface,
-                                 "Connect", &Impl::connect_reply_cb, impl_.get(), "");
-    if (rc < 0) {
+    if (!impl_->issue_connect()) {
         impl_->shutdown();
         return false;
     }
@@ -1035,11 +1115,26 @@ void BleTransport::poll() {
         return;
     }
 
-    // Joiner overall handshake budget (the host lobby waits unbounded).
-    if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting &&
-        ble_handshake_timed_out(impl.start_ms, monotonic_ms())) {
-        impl.fail();
-        return;
+    if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting) {
+        if (impl.retry_pending) {
+            // Waiting out the retry pause; reissue Connect once any stale
+            // reply of the previous attempt has been seen.
+            if (ble_retry_delay_elapsed(impl.retry_failed_ms, monotonic_ms()) &&
+                !impl.connect_in_flight) {
+                impl.retry_pending = false;
+                if (!impl.issue_connect()) {
+                    impl.fail();
+                    return;
+                }
+            }
+            pump(impl.bus);
+            return;
+        }
+        // Handshake budget is per attempt (the host lobby waits unbounded).
+        if (ble_handshake_timed_out(impl.start_ms, monotonic_ms())) {
+            impl.attempt_failed(true);
+            return;
+        }
     }
 
     if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting) {
@@ -1069,7 +1164,7 @@ void BleTransport::poll() {
             // Incoming frames arrive as PropertiesChanged(Value) on the TX
             // characteristic -- subscribe before enabling notifications so
             // no early notification can slip past the match.
-            sd_bus_match_signal(impl.bus, nullptr, kBluez, impl.tx_char_path.c_str(), kPropsIface,
+            sd_bus_match_signal(impl.bus, &impl.tx_match_slot, kBluez, impl.tx_char_path.c_str(), kPropsIface,
                                 "PropertiesChanged", &Impl::tx_props_changed_cb, impl_.get());
             sd_bus_call_method_async(impl.bus, nullptr, kBluez, impl.tx_char_path.c_str(),
                                      kGattCharIface, "StartNotify",

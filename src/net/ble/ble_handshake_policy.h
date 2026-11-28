@@ -13,9 +13,27 @@
 
 namespace battleship::net {
 
-/// Overall budget for a joiner to reach Connected (TX subscription live),
+/// Budget PER ATTEMPT for a joiner to reach Connected (TX subscription live),
 /// (joiner only).
 inline constexpr uint32_t kBleHandshakeTimeoutMs = 15000;
+
+/// Total Device1.Connect attempts a joiner makes before giving up (the combo
+/// chip's shared WiFi/BT antenna makes the first LE links drop often).
+inline constexpr int kBleConnectAttempts = 3;
+
+/// Pause before each retry.
+inline constexpr uint32_t kBleRetryDelayMs = 1000;
+
+/// True when another attempt may be made after `attempts_made` (>= 1) failed.
+inline bool ble_should_retry(int attempts_made) {
+    return attempts_made < kBleConnectAttempts;
+}
+
+/// True once the retry pause has elapsed since the failure at `failed_ms`.
+inline bool ble_retry_delay_elapsed(uint64_t failed_ms, uint64_t now_ms,
+                                    uint32_t delay_ms = kBleRetryDelayMs) {
+    return now_ms >= failed_ms && now_ms - failed_ms >= delay_ms;
+}
 
 /// True once `timeout_ms` have elapsed since `start_ms` (monotonic ms).
 /// Relies on the 64-bit ms counter never wrapping; now < start is treated as

@@ -104,6 +104,7 @@ const Table kChineseTable = [] {
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "网络错误";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "确定 - 返回标题";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLost)] = "连接已断开";
+    t[static_cast<std::size_t>(StrId::NetErrorConnectionLostBle)] = "连接已断开。关闭WiFi可使蓝牙对战更稳定";
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "连接方式";
     t[static_cast<std::size_t>(StrId::NetTransportBle)] = "蓝牙 (BLE)";

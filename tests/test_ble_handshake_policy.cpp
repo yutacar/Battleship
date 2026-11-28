@@ -29,3 +29,19 @@ TEST(BleHandshakePolicy, ResolvedFalseOnlyLostAfterTrue) {
     EXPECT_FALSE(ble_device_link_lost(false, false, true, true, true));
     EXPECT_FALSE(ble_device_link_lost(false, false, false, false, true));  // unrelated property
 }
+
+TEST(BleHandshakePolicy, RetryAttemptsBudget) {
+    EXPECT_EQ(kBleConnectAttempts, 3);
+    EXPECT_TRUE(ble_should_retry(1));
+    EXPECT_TRUE(ble_should_retry(2));
+    EXPECT_FALSE(ble_should_retry(3));
+    EXPECT_FALSE(ble_should_retry(4));
+}
+
+TEST(BleHandshakePolicy, RetryDelayElapsed) {
+    EXPECT_EQ(kBleRetryDelayMs, 1000u);
+    EXPECT_FALSE(ble_retry_delay_elapsed(5000, 5000));
+    EXPECT_FALSE(ble_retry_delay_elapsed(5000, 5000 + kBleRetryDelayMs - 1));
+    EXPECT_TRUE(ble_retry_delay_elapsed(5000, 5000 + kBleRetryDelayMs));
+    EXPECT_FALSE(ble_retry_delay_elapsed(5000, 4000));  // clock never goes backwards
+}

@@ -145,6 +145,7 @@ enum class StrId {
     NetErrorTitle,
     NetErrorOkBackToTitle,
     NetErrorConnectionLost,
+    NetErrorConnectionLostBle,     ///< BLE match lost: also advises turning Wi-Fi off (shared antenna)
 
     // ---- Net transport select (Phase 6) ----
     NetTransportTitle,             ///< "Connection Type" screen title

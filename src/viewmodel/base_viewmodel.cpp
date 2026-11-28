@@ -1486,7 +1486,11 @@ void BaseViewModel::net_sync_session_state() {
                 break;
             case SessionPhase::Disconnected:
                 if (previous_phase != SessionPhase::Finished) {
-                    net_status_subject_.set(i18n::tr(i18n::StrId::NetErrorConnectionLost));
+                    // BLE shares one antenna with Wi-Fi on the device: advise
+                    // turning Wi-Fi off. LoRa keeps the plain text.
+                    net_status_subject_.set(i18n::tr(net_flow_ble_
+                                                         ? i18n::StrId::NetErrorConnectionLostBle
+                                                         : i18n::StrId::NetErrorConnectionLost));
                     show_page(model::AppPage::NetError);
                 }
                 // Post-game transport death (opponent quit the app from
