@@ -105,7 +105,7 @@ const Table kEnglishTable = [] {
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "Network";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "OK - back to title";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLost)] = "Connection lost";
-    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "Wi-Fi is on. Turn it off for a stable Bluetooth match.";
+    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "Turn Wi-Fi off for a stable Bluetooth match.";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLostBle)] = "Connection lost. Turning Wi-Fi off makes Bluetooth play more stable.";
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "Connection Type";

@@ -133,7 +133,7 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     // or two Battleship hosts are in range at a time.
     auto* list = lv_obj_create(content);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, LV_PCT(100), 76);  // 3 rows; leaves room for the Wi-Fi warning
+    lv_obj_set_size(list, LV_PCT(100), 100);
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 28);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -142,7 +142,8 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     ui->list = list;
 
     auto* empty = lv_label_create(content);
-    lv_label_set_text(empty, i18n::tr(view_model().net_using_lora()
+    lv_label_set_text(empty, i18n::tr(view_model().net_using_lora() &&
+                                              !viewmodel::BaseViewModel::net_wifi_warn_forced()
                                           ? i18n::StrId::NetJoinScanningLora
                                           : i18n::StrId::NetJoinScanningBle));
     lv_obj_set_style_text_font(empty, i18n::font_for_size(12), 0);
@@ -183,6 +184,15 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_add_event_cb(back_button, back_cb, LV_EVENT_CLICKED, &view_model());
     lv_group_add_obj(BaseScreen::shared_group(), back_button);
     BaseScreen::enable_arrow_focus_navigation(back_button);
+
+    // While the Wi-Fi warning is visible the list shrinks (3 rows) so the
+    // warning line never overlaps a peer row; otherwise it keeps 100 px.
+    reactive::observe_obj(
+        list, view_model().net_wifi_warn_subject(),
+        [](lv_observer_t* observer, lv_subject_t* subject) {
+            auto* target = lv_observer_get_target_obj(observer);
+            lv_obj_set_height(target, lv_subject_get_int(subject) ? 76 : 100);
+        });
 
     // The delete hook rides on the list container (always present).
     lv_obj_add_event_cb(list, list_delete_cb, LV_EVENT_DELETE, ui);

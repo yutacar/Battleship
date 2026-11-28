@@ -336,6 +336,10 @@ public:
     /// poll. Test tooling: BATTLESHIP_FORCE_WIFI_WARN=1 forces it on for any
     /// network flow (screenshots on desktop, where BLE does not exist).
     lv_subject_t* net_wifi_warn_subject();
+    /// True when BATTLESHIP_FORCE_WIFI_WARN=1 (screenshot tooling): the net
+    /// screens then also present BLE status texts, so desktop (LoRa sim)
+    /// captures look like the BLE flow.
+    static bool net_wifi_warn_forced();
 
     // ---- Boards the active screens should render ----
     // These dispatch on match_mode(): Game boards for hotseat/VsAi, the

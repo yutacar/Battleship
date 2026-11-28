@@ -105,7 +105,7 @@ const Table kJapaneseTable = [] {
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "通信エラー";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "OK - タイトルへ";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLost)] = "接続が切断されました";
-    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "WiFiがオンです。オフにするとBluetooth対戦が安定します";
+    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "WiFiをオフにするとBluetooth対戦が安定します";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLostBle)] = "接続が切れました。WiFiをオフにするとBluetooth対戦が安定します";
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "接続方式";

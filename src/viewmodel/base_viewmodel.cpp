@@ -922,10 +922,14 @@ lv_subject_t* BaseViewModel::net_wifi_warn_subject() {
     return net_wifi_warn_subject_.native();
 }
 
+bool BaseViewModel::net_wifi_warn_forced() {
+    const char* force = std::getenv("BATTLESHIP_FORCE_WIFI_WARN");
+    return force && force[0] == '1';
+}
+
 void BaseViewModel::net_refresh_wifi_warning(uint32_t now) {
     net_wifi_warn_last_ms_ = now;
-    const char* force = std::getenv("BATTLESHIP_FORCE_WIFI_WARN");
-    const bool forced = force && force[0] == '1';
+    const bool forced = net_wifi_warn_forced();
     const bool warn = (net_flow_ble_ && platform::wifi_connected()) || forced;
     const int32_t value = warn ? 1 : 0;
     if (net_wifi_warn_subject_.value() != value) {
@@ -982,7 +986,10 @@ void BaseViewModel::start_network_host() {
 
         const std::string advertised = std::string(battleship::net::kBleNamePrefix) + host_name;
         net_status_subject_.set(
-            i18n::trf(i18n::StrId::NetLoraHostingAs, advertised.c_str()).c_str());
+            i18n::trf(net_wifi_warn_forced() ? i18n::StrId::NetLobbyAdvertisingAs
+                                             : i18n::StrId::NetLoraHostingAs,
+                      advertised.c_str())
+                .c_str());
 
         ensure_net_poll_timer();
         net_refresh_wifi_warning(lv_tick_get());  // 0 on LoRa unless forced for screenshots
@@ -1039,7 +1046,8 @@ void BaseViewModel::start_network_join() {
         }
         net_lora_link_->start_scan(net_lora_now_ms());
         net_hosts_signature_ = 0;
-        net_status_subject_.set(i18n::tr(i18n::StrId::NetJoinScanningLora));
+        net_status_subject_.set(i18n::tr(net_wifi_warn_forced() ? i18n::StrId::NetJoinScanningBle
+                                                                : i18n::StrId::NetJoinScanningLora));
         ensure_net_poll_timer();
         net_refresh_wifi_warning(lv_tick_get());  // 0 on LoRa unless forced for screenshots
         net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);

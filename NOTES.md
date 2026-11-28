@@ -1344,13 +1344,13 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
     （`NetErrorConnectionLostBle`、LoRa は従来の文言）。
   - **対戦前の警告**: BLE のホストロビー／ジョイン（スキャン）画面で WiFi が接続中
     （`/sys/class/net/*` の `wireless` 持ちIFの operstate が `up`、読み取り専用の
-    `platform::wifi_connected()`）なら「WiFiがオンです。オフにするとBluetooth対戦が安定します」
+    `platform::wifi_connected()`）なら「WiFiをオフにするとBluetooth対戦が安定します」
     を表示（`NetWifiOnWarning`、画面入場時＋net poll から最大1秒に1回再判定）。
     実機結果: WiFi オンの BLE 対戦は、上記リトライ込みでも**両方向とも 3/3 回失敗**
     （supervision timeout）、WiFi オフでは成立。LoRa 画面は警告なし。
     デスクトップのスクショ用に `BATTLESHIP_FORCE_WIFI_WARN=1` で強制表示できる
     （docs/screenshots/ble_wifi_{en,ja,zh}_0{1,2}_*.png。デスクトップに BLE は無いので
-    LoRa シミュレータのロビーに警告を載せた画像）。
+    LoRa シミュレータの上で BLE 用の状態文言を出して撮った画像）。
   - **復旧**: 片方の機体にだけボンドが残っている（相手側で削除した）場合は、
     もう一方でも古いボンドを削除する（`bluetoothctl remove <addr>`）。その後に
     再度対戦する。
