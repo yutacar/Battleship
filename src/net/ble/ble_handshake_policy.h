@@ -14,11 +14,12 @@
 namespace battleship::net {
 
 /// Overall budget for a joiner to reach Connected (TX subscription live),
-/// and for a host to see a connected central finish subscribing.
+/// (joiner only).
 inline constexpr uint32_t kBleHandshakeTimeoutMs = 15000;
 
-/// True once `timeout_ms` have elapsed since `start_ms` (monotonic ms,
-/// wrap-safe for 64-bit inputs).
+/// True once `timeout_ms` have elapsed since `start_ms` (monotonic ms).
+/// Relies on the 64-bit ms counter never wrapping; now < start is treated as
+/// "not timed out".
 inline bool ble_handshake_timed_out(uint64_t start_ms, uint64_t now_ms,
                                     uint32_t timeout_ms = kBleHandshakeTimeoutMs) {
     return now_ms >= start_ms && now_ms - start_ms >= timeout_ms;

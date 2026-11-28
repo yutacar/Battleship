@@ -377,16 +377,19 @@ struct BleTransport::Impl {
     bool start_notify_sent = false;
     uint64_t last_resolve_poll_us = 0;
     uint64_t start_ms = 0;               ///< start_join() time (handshake timeout)
-
-    // ---- host: central seen on the link before the handshake completes ----
-    std::string central_path;            ///< Device1 that went Connected=true
-    uint64_t central_since_ms = 0;
+    bool link_confirmed = false;         ///< Connect reply ok or Connected=true seen
 
     std::vector<uint8_t> recv_buffer;
 
     ~Impl() { shutdown(); }
 
     void fail() {
+        if (state != TransportState::Disconnected && bus && role == Role::Join &&
+            !device_path.empty()) {
+            // Best-effort teardown of a pending/half-up link (no wait).
+            sd_bus_call_method_async(bus, nullptr, kBluez, device_path.c_str(), kDeviceIface,
+                                     "Disconnect", nullptr, nullptr, "");
+        }
         state = TransportState::Disconnected;
     }
 
@@ -422,8 +425,7 @@ struct BleTransport::Impl {
         char_query_in_flight = false;
         start_notify_sent = false;
         start_ms = 0;
-        central_path.clear();
-        central_since_ms = 0;
+        link_confirmed = false;
         device_path.clear();
         rx_char_path.clear();
         tx_char_path.clear();
@@ -582,10 +584,8 @@ struct BleTransport::Impl {
 
     // ---------------- link-loss watch (both roles) ----------------
 
-    /// org.bluez.Device1 PropertiesChanged. Join: our peer device (match is
-    /// path-filtered). Host: any device under the adapter; the first one to
-    /// go Connected=true while we are still Connecting is taken to be the
-    /// central, and its drop before the TX subscription fails the transport.
+    /// org.bluez.Device1 PropertiesChanged on the joiner's peer device (the
+    /// match is path-filtered): link loss fails the transport.
     static int device_props_changed_cb(sd_bus_message* m, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
         const char* iface = nullptr;
@@ -625,25 +625,18 @@ struct BleTransport::Impl {
         if (self->state == TransportState::Disconnected) {
             return 0;
         }
+        // Join only. The host ignores device connects/disconnects in the
+        // lobby (unrelated devices must never affect it); post-handshake peer
+        // loss is covered by StopNotify and the session's silence timeout.
         if (self->role == Role::Join) {
-            if (ble_device_link_lost(has_connected, connected, has_resolved, resolved,
-                                     self->services_resolved)) {
-                self->fail();
+            if (has_connected && connected) {
+                self->link_confirmed = true;
             }
-        } else if (self->role == Role::Host && has_connected) {
-            const char* path = sd_bus_message_get_path(m);
-            if (!path) {
-                return 0;
-            }
-            if (connected) {
-                if (self->state == TransportState::Connecting && self->central_path.empty()) {
-                    self->central_path = path;
-                    self->central_since_ms = monotonic_ms();
-                }
-            } else if (self->central_path == path) {
-                // Central vanished: before the handshake that would leave the
-                // lobby on "connecting" forever; after it, peer loss (the
-                // StopNotify path may not fire on a supervision timeout).
+            // A Connected=false before our Connect reply / Connected=true may
+            // be the tail of a previous link (e.g. a retry): not a loss yet.
+            const bool lost_connected = has_connected && !connected && self->link_confirmed;
+            if (lost_connected || ble_device_link_lost(false, false, has_resolved, resolved,
+                                                       self->services_resolved)) {
                 self->fail();
             }
         }
@@ -656,7 +649,9 @@ struct BleTransport::Impl {
         auto* self = static_cast<Impl*>(userdata);
         if (sd_bus_message_is_method_error(reply, nullptr)) {
             self->fail();
+            return 0;
         }
+        self->link_confirmed = true;
         // Success: keep waiting for ServicesResolved (polled from poll()).
         return 0;
     }
@@ -906,18 +901,6 @@ bool BleTransport::start_host(const std::string& host_name) {
         return false;
     }
 
-    {
-        const std::string match =
-            "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',"
-            "member='PropertiesChanged',path_namespace='" +
-            impl_->adapter + "',arg0='org.bluez.Device1'";
-        if (sd_bus_add_match(impl_->bus, nullptr, match.c_str(), &Impl::device_props_changed_cb,
-                             impl_.get()) < 0) {
-            impl_->shutdown();
-            return false;
-        }
-    }
-
     impl_->state = TransportState::Connecting;
     pump(impl_->bus);
     return true;
@@ -979,16 +962,11 @@ void BleTransport::poll() {
         return;
     }
 
-    // Overall handshake budget: joiner from start_join(); host from the
-    // moment a central connected (waiting for a lobby is unbounded).
-    if (impl.state == TransportState::Connecting) {
-        const uint64_t since = impl.role == Impl::Role::Join ? impl.start_ms
-                               : !impl.central_path.empty() ? impl.central_since_ms
-                                                            : 0;
-        if (since != 0 && ble_handshake_timed_out(since, monotonic_ms())) {
-            impl.fail();
-            return;
-        }
+    // Joiner overall handshake budget (the host lobby waits unbounded).
+    if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting &&
+        ble_handshake_timed_out(impl.start_ms, monotonic_ms())) {
+        impl.fail();
+        return;
     }
 
     if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting) {
