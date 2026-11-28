@@ -285,8 +285,11 @@ bool BleScanner::start() {
     }
 
     // LE-only discovery filter. Duplicates are fine (we re-enumerate the
-    // device list rather than consuming per-advert events); filtering to LE
-    // just keeps BR/EDR neighbours out of the cache.
+    // device list rather than consuming per-advert events). Load-bearing on
+    // a dual-mode adapter: a Transport filter makes BlueZ run "filtered
+    // discovery", which reports LE adverts even without the General
+    // Discoverable bit -- and our host advertises with Discoverable=false
+    // (Flags 0x00/0x04, see adv_discoverable_cb) so joiners connect over LE.
     sd_bus_error error = SD_BUS_ERROR_NULL;
     sd_bus_call_method(impl_->bus, kBluez, impl_->adapter.c_str(), kAdapterIface,
                        "SetDiscoveryFilter", &error, nullptr, "a{sv}", 1, "Transport", "s", "le");
@@ -518,6 +521,22 @@ struct BleTransport::Impl {
         return sd_bus_message_append_strv(reply, const_cast<char**>(uuids));
     }
 
+    // Always false, deliberately. BlueZ (advertising.c set_flags) then
+    // writes our own Flags AD element: 0x04 "BR/EDR Not Supported" while
+    // the adapter is not classic-discoverable, 0x00 while it is. Either
+    // way the joiner's BlueZ never marks us BR/EDR-capable from this
+    // advert (adapter.c only does so for non-zero Flags without 0x04), so
+    // its Device1.Connect picks LE. Without this property the kernel fills
+    // in Flags 0x02 whenever the launcher has made the adapter
+    // discoverable, and the joiner's select_conn_bearer() prefers BR/EDR:
+    // classic SSP with no agent -> Authentication Failure -> no match.
+    // The joiner scans with an LE Transport filter (filtered discovery),
+    // which reports adverts without the General Discoverable bit too.
+    static int adv_discoverable_cb(sd_bus*, const char*, const char*, const char*,
+                                   sd_bus_message* reply, void*, sd_bus_error*) {
+        return sd_bus_message_append(reply, "b", 0);
+    }
+
     static int adv_release_cb(sd_bus_message* m, void*, sd_bus_error*) {
         return sd_bus_reply_method_return(m, "");
     }
@@ -727,6 +746,7 @@ const sd_bus_vtable BleTransport::Impl::kAdvVtable[] = {
     SD_BUS_PROPERTY("LocalName", "s", adv_local_name_cb, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_PROPERTY("ServiceUUIDs", "as", adv_service_uuids_cb, 0,
                     SD_BUS_VTABLE_PROPERTY_CONST),
+    SD_BUS_PROPERTY("Discoverable", "b", adv_discoverable_cb, 0, SD_BUS_VTABLE_PROPERTY_CONST),
     SD_BUS_METHOD("Release", "", "", adv_release_cb, SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
