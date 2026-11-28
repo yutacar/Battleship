@@ -964,7 +964,7 @@ BATTLESHIP_NET_AUTOPILOT=lose APP_SCRIPT="500:key:down:300:key:down:300:key:ente
    デバッグを混乱させた → `setvbuf(stdout, _IOLBF)` を app 起動時に設定。
 
 スクリーンショット（docs/screenshots/、全て目視確認済み）:
-`net_host_waiting` / `net_join_list`（発見ホスト表示）/ `net_join_direct_ip` /
+`net_host_waiting` / `net_join_list`（発見ホスト表示）/
 `net_placement` / `net_ready_wait`（相手配置待ち）/ `net_battle_host` +
 `net_battle_join`（同一対戦の両画面、状態表示が相互整合）/
 `net_result_host_win` + `net_result_join_lose`（Run1: Host 勝ち）/
@@ -1178,8 +1178,9 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
   （コンパイル時）+ `NetMessages.EveryEncodedFrameFitsOneBleWriteAtDefaultMtu`
   テスト（実 encode の実測）で二重に固定した。受信側はどんなチャンクで
   届いても既存 `FrameDecoder` が再同期するので、通知の分断/結合にも元々耐性がある。
-- **Just Works（明記）**: ペアリング/ボンディングは要求せず、リンク暗号化は
-  スコープ外。プロトコルは座標と結果しか運ばず盤面情報を送らない設計
+- **ペアリング（§13.6.1）**: アプリ自体はペアリングを要求しないが、MIDI 起因の
+  SMP ペアリングをアプリ内 Agent1 が自動承認するため、実機では初回接続で
+  ボンドされ、2回目以降はそのボンドでリンクが暗号化される。プロトコルは座標と結果しか運ばず盤面情報を送らない設計
   （§11.1）なので、傍受されても相手プレイヤーが画面で見る以上の情報は漏れない。
 - **スレッドモデル**: 他のトランスポート同様、完全シングルスレッド poll 駆動。
   `poll()` = `sd_bus_process()` の非ブロッキング排出。ブロッキング呼び出しは
@@ -1299,13 +1300,69 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
    rfkill/§13.5）。`org.bluez.Error.NotPermitted` 系は D-Bus ポリシー。
    両機の自動対戦は WiFi 同様 `BATTLESHIP_NET_AUTOPILOT=win|lose` が使える
 
+### 13.6.1 BLE 実機検証結果（2026-11-28）
+
+実機2台（btmon で観測）での BLE 対戦検証で見つかった問題と対処。
+（章番号は既存の §13.7 既知の制約・§13.8 の参照を壊さないため 13.6.1 とした。）
+
+- **BR/EDR ベアラ問題**: ホストのアドバタイズに Flags 0x02 が付くと、ジョイナ側
+  BlueZ が BR/EDR を選んで接続 → 古典 SSP が agent 無しで Authentication Failure。
+  対処: アドバタイズの `Discoverable=false` 固定（efc5c66）。ジョイナは LE
+  Transport フィルタでスキャンする。
+- **MIDI 起因の SMP ペアリング**: 両機に PipeWire の BLE-MIDI GATT サーバ
+  （service 03b80e5a-ede8-4b33-a751-6ce34ec4c700、特性は暗号化必須）があり、相手の
+  bluetoothd の MIDI クライアントが GATT 探索直後にそれを読む → Insufficient
+  Encryption → カーネルが SMP ペアリング（両側 KeyboardDisplay、SC+MITM で
+  numeric comparison）→ agent が無く "User Confirmation Negative Reply" →
+  Pairing Failed (0x0c) → 接続後約3秒でリンク断（NUS の StartNotify 前）。
+  対処: `BleTransport` が両ロールで `org.bluez.Agent1`（/com/battleship/agent）を
+  `RegisterAgent("KeyboardDisplay")` + `RequestDefaultAgent` で登録し、
+  RequestConfirmation / RequestAuthorization を自動承認（AuthorizeService・
+  PIN/Passkey 要求は Rejected）。登録失敗は無視。ボンドは保持され、同じ2台の
+  2回目以降はペアリング不要。アプリは pi ユーザ（bluetooth グループ外）だが、
+  D-Bus ポリシー上 default context から org.bluez 宛の送信は可能で登録できる。
+  手動で bluetoothctl の agent により両機をボンドした後は双方向で対戦成功。
+  **アプリ内 agent による自動ペアリングは 2026-11-28 に実機で検証済み**
+  （初回接続でペアリング = User Confirmation に positive reply・LTK 保存、
+  2回目以降はボンドで暗号化接続しペアリングなし）。
+  Agent の RequestConfirmation / RequestAuthorization は、ジョイナでは接続先
+  デバイス（device_path）以外を Rejected にし、ホストは相手を事前に知り得ないため
+  任意のデバイスを承認する。
+- **WiFi 2.4 GHz 共存（実機確認済みの問題）**: コンボチップは WiFi と BT で
+  アンテナを1本共有しており、BlueZ 既定の LE supervision timeout（420 ms）では
+  WiFi 接続中はほぼ毎回 1〜3 秒以内にリンクが切れる（HCI reason 0x08）。WiFi オフ
+  でも、ペアリング直後などに時折発生する。最初の数秒を生き延びたリンクでは
+  対戦を最後まで完走できた。システム設定（supervision timeout 等）は変更しない方針で、
+  次の緩和策をアプリ側に入れた:
+  - **ジョイナの自動リトライ**: 接続確立前（Connecting）にリンク断または Connect
+    失敗が起きたら、1000 ms 待って `Device1.Connect` を最大2回再試行（計3回、
+    `kBleConnectAttempts` / `kBleRetryDelayMs`、判定は `ble_handshake_policy.h`）。
+    15 秒のハンドシェイクタイムアウトは1回ごと。Connected 後の切断は従来どおり
+    即失敗（試合中のリトライなし）。ホスト側は変更なし（ロビーで待ち続ける）。
+  - **ヒント表示**: BLE 対戦で接続エラーになった場合、NetError 画面に
+    「WiFiをオフにするとBluetooth対戦が安定します」を追記して表示する
+    （`NetErrorConnectionLostBle`、LoRa は従来の文言）。
+  - **対戦前の警告**: BLE のホストロビー／ジョイン（スキャン）画面で WiFi が接続中
+    （`/sys/class/net/*` の `wireless` 持ちIFの operstate が `up`、読み取り専用の
+    `platform::wifi_connected()`）なら「WiFiをオフにするとBluetooth対戦が安定します」
+    を表示（`NetWifiOnWarning`、画面入場時＋net poll から最大1秒に1回再判定）。
+    実機結果: WiFi オンの BLE 対戦は、上記リトライ込みでも**両方向とも 3/3 回失敗**
+    （supervision timeout）、WiFi オフでは成立。LoRa 画面は警告なし。
+    デスクトップのスクショ用に `BATTLESHIP_FORCE_WIFI_WARN=1` で強制表示できる
+    （docs/screenshots/ble_wifi_{en,ja,zh}_0{1,2}_*.png。デスクトップに BLE は無いので
+    LoRa シミュレータの上で BLE 用の状態文言を出して撮った画像）。
+  - **復旧**: 片方の機体にだけボンドが残っている（相手側で削除した）場合は、
+    もう一方でも古いボンドを削除する（`bluetoothctl remove <addr>`）。その後に
+    再度対戦する。
+
 ### 13.7 既知の制約
 
 - **Mac では BLE の実通信検証もコンパイルも不可**（BATTLESHIP_BLE=0）。
   ロジック（フレーミング/信頼性/セッション）は Loopback で全テスト済みのため、
   残リスクは BlueZ 連携部分（register/advertise/subscribe の実挙動）に限定
   （PLAN.md リスク表どおり）。実機2台での §13.6 が最終検証。
-- Just Works・リンク暗号化なし（意図したスコープ、§13.1）。
+- アプリ層に独自の暗号化・認証は無い（リンク暗号化は初回ペアリング後のボンド頼み。
+  アプリ内 Agent1 が自動承認、§13.6.1）。
 - BLE には Direct IP に相当する手動フォールバック入力が無い（スキャンのみ）。
 - 再接続/再戦同期は WiFi 版と同じく将来課題（切断 = セッション終了）。
 
@@ -1695,8 +1752,10 @@ persisted except UI language/transport preference, in a local config
 file.
 
 ## Known limitations
-- BLE has no encryption (Just Works pairing, no bonding) -- intentional
-  scope for a LAN-local casual 2-player game.
+- BLE adds no app-level encryption/authentication. The in-app BlueZ agent
+  auto-accepts pairing, so the first match bonds the two units and later
+  links are encrypted with that bond (NOTES.md 13.6.1) -- intentional scope
+  for a casual 2-player game.
 - BLE reconnection after a mid-match disconnect is not supported
   (matches WiFi's existing behavior: disconnect ends the match).
 - LoRa transport is designed but not implemented (Phase 8, future).
@@ -2218,3 +2277,106 @@ battleship・chainled を含む全 40 アプリを削除**した。このため 
   デスクトップ ctest 143/143 green
 - `battleship_1.0.0-1_arm64.deb`: 965782 バイト、sha256
   `32d86ca7419e6ae2f638e5cbe5fd09abc091c3a751f2e533a8ce3862857ccc63`
+
+## 21. LoRa L0 bring-up（Cap LoRa-1262、2026-11-27）
+
+### 21.1 ハード構成
+- A = CardputerZero-7f96ffcb（CPU シリアル 3b4cc9e1）、B = CardputerZero-604e313a（同 b77d6248）。
+  どちらも Cap LoRa-1262 + アンテナ装着（ラベルは 868、921.8 MHz で使用）。机上で約 30 cm 離して配置
+- Debian 13 / kernel 6.18。probe は adb で `/tmp/battleship_lora_probe` に push して実行
+
+### 21.2 `battleship_lora_probe`
+- 使い方: `battleship_lora_probe info | ping [--count N] | pong | listen [--seconds S] | blast [--seconds S]`
+- `BATTLESHIP_LORA_HW=ON` のビルドでのみ生成。install 対象外なので .deb には入らない
+- 送信はすべて Japan920Policy 経由（airtime ≤ 400 ms、送信終了後 ≥ 50 ms 休止）、
+  ≥ 5 ms のキャリアセンスはドライバ側。SIGINT/SIGTERM でも必ず `CapPower::release`
+- Busy になるたびに理由・RSSI・サンプル番号・再アーム後経過 µs・IRQ を表示（診断）
+
+### 21.3 info の結果（2 台とも、root と pi（runuser、XDG_RUNTIME_DIR=/run/user/1000）の両方）
+- power acquire OK (owned=1) / expander 0x43 OK / radio init None / sync word 14 24 /
+  last_rx_rearm_us 約 5.5 ms（初回 RX。TCXO 起動を含む）/ power released brightness=0 /
+  マーカーファイル削除済み
+
+### 21.4 ping 50 / pong（A が ping、B が pong）
+| 回 | コミット | 受信 | RTT min/中央/max (ms) | RSSI / SNR | Busy (ping/pong) | tx_start | rearm |
+|---|---|---|---|---|---|---|---|
+| 1 | 229483d | 50/50 | 97.8 / 102.1 / 113.3 | -51 dBm / 約 12.5 dB | 31 / 17 | 中央 5.9 ms、max 8.1 ms | 中央 418 µs |
+| 2 | 6ae4332（診断） | 50/50 | 98.0 / 102.1 / 107.6 | - | 22 / 15 | - | - |
+| 3 | 9f9659d（修正） | 50/50 | 99.5 / 100.5 / 102.8 | -51 dBm | 0 / 0 | 中央 7.0 ms、max 9.0 ms（予算 10 ms） | 中央 462 µs、max 2.6 ms |
+
+### 21.5 偽 Busy の診断と修正
+- 症状: 周囲に他の送信機が無いのに、受信直後の送信で Busy が頻発（1 回目）
+- 診断（2 回目）: Busy は全件 reason=CarrierRssi、CS サンプル 0 番目、SetRx 再アームから
+  73〜156 µs、読み値 -68〜-75 dBm、irq 0x0000
+- 根本原因: SetRx 直後の GetRssiInst は直前に受信したパケット由来の古い RSSI を返し、
+  最初の 1 サンプルが閾値 -90 dBm を超えて Busy 判定になる
+- 修正: `carrier_sense()` で再アーム後 `kRssiSettleUs = 1000` µs が経つまで RSSI を評価せず待つ
+  （待機中も IRQ 線は監視し、立てば従来どおり Busy）。**その後に 5 ms の有効サンプル窓を
+  フルで実施**するため、ARIB の「5 ms 以上のキャリアセンス」は短縮されない。
+  待ち時間の判定は純関数 `sx1262_cs_settle_wait_us()`（デスクトップ単体テスト付き）
+- 結果（3 回目）: Busy 0/0、50/50、RTT 中央値 100.5 ms。tx_start は待機分増えて中央 7.0 ms
+
+### 21.6 キャリアセンスの実測
+- B が 10 秒 blast + A が ping(8): B は 88 パケット送信（約 114 ms 周期 = 21 バイトフレームの
+  airtime 約 57 ms + 休止 50 ms + CS）。A の ping 1 回あたり 6〜9 回、RxInProgress
+  （irq 0x0004 PreambleDetected / 0x0014 HeaderValid 付き）で送信が延期された。
+  A 側の Busy は 0 だったが、A の 1500 ms タイムアウトが B の送信間隙に位相同期したためで、
+  LBT の証拠にはならない（位相ロックのアーティファクト）
+- A と B が同時に 10 秒 blast: A は 75 送信 / Busy 367（RxInProgress 357、CarrierRssi 10）、
+  B は 76 送信 / Busy 353（RxInProgress）、失敗 0。双方が互いに譲り合っており、LBT は
+  両方向で機能。（単独 blast は 10 秒で 88 パケット）
+
+### 21.7 ARIB STD-T108 v1.5 第 2 部 と本実装
+| 項目 | ARIB の値 | 本アプリ |
+|---|---|---|
+| 中心周波数 | 920.6〜922.2 MHz（このクラス） | 921.8 MHz（ch30、プロファイル既定） |
+| 帯域幅 / 変調 | 単位チャネル 200 kHz | BW 125 kHz、SF7、CR 4/5、プリアンブル 8、同期語 0x12（reg 0x0740 = 14 24 確認済み） |
+| 空中線電力 | 20 mW（13 dBm） | SetTxParams 13 dBm、PA 設定 0x04/0x07/0x00/0x01、OCP 0x38（出力 ≈ TxParams 値）。測定器なし = チップ設定のみで未実測 |
+| TCXO | - | DIO3 3.0 V、起動 5 ms（LoRa Messenger docs/phase6-cap-lora-1262.md の設定と一致） |
+| キャリアセンス | ≥ 5 ms、閾値 -80 dBm | ≥ 5 ms、-90 dBm（`sx1262_lbt_config_valid` で強制）+ 再アーム後 1 ms の RSSI 整定待ち（実測由来） |
+| 送信時間 | 1 回 4 秒未満 | airtime > 400 ms はポリシーが拒否（最大 80 B で約 0.14 s）。SX1262 の SetTx タイムアウト（フェイルセーフ）は 3 秒 |
+| 送信休止 | 送信終了後 50 ms 以上 | Japan920Policy で強制。基準は送信開始後に読んだ時刻（キャリアセンス後）+ airtime、さらに安全マージン 5 ms（実効 55 ms、`kEmissionPauseSafetyMarginMs`） |
+| 時間当たり上限 | 920.6〜922.2 MHz で CS ≥ 5 ms なら無し | 設けていない |
+
+### 21.8 権限
+- pi ユーザーは groups spi / i2c / gpio に所属。デバイスノードは root:spi / root:i2c / root:gpio
+  660、`ext_5v_out` の brightness は root:gpio 664 → **sudo 不要**で動作
+
+### 21.9 RadioLib フォールバック
+- 不要。LoRa Messenger 由来のドライバで L0 の目標を満たした
+
+### 21.10 未検証（Task 10 へ）
+- `listen` でのビーコン広告文確認（アプリのホストビーコンが必要）
+- Cap 未装着時のエラー UI、各アプリ終了経路での電源解放、長押し Esc 時にランチャーが送るシグナル
+  （アプリのインストールが必要）
+
+## 22. 1.1.0-1 リリース（2026-11-28）
+
+### 22.1 変更概要
+- **LoRa 対戦を追加**（Cap LoRa-1262 / SX1262、921.8MHz・BW125kHz・SF7・≤13dBm・LBT 5ms/-90dBm）。
+  詳細は §21 と docs/superpowers/specs/2026-11-27-lora-transport-design.md
+- **WiFi 対戦を削除**（caae4cc）。Network Play は BLE（既定）または LoRa のみ。実行時ソケットは
+  LoRa UDP シミュレータ（デスクトップ / `BATTLESHIP_LORA_SIM=1` のみ）以外に残っていない
+- **BLE 修正**（efc5c66..1abb210）: LE 専用接続、BlueZ Agent1 による自動ペアリング、Join 側の
+  自動リトライ、Wi-Fi 接続中の警告表示。既知の制限: Wi-Fi 接続中は BLE 対戦不可（アンテナ共用）。
+  2 台のペアリングは初回の BLE 対戦時に自動で行われ保持される
+- **1.0.0-3 の修正を同梱**（未公開だった 1.0.0-3、1637746）: CardputerZero 内蔵キーボード
+  （tca8418）の Sym レイヤーをデコード。Sym+R の `-`、Sym+T の `+`、Sym+S の `:`、Sym+B の `.` などが
+  落ちる／誤変換される問題を修正（M5 の symbol table を内蔵キーボードにのみ適用、USB キーボードは標準のまま）
+- **ストア権限の変更**: `network` true→false、`additional_hardware` false→true。
+  説明文は WiFi の記述を除去し、LoRa（任意、Cap LoRa-1262 装着時）を追記（3 言語）
+
+### 22.2 LoRa L3 実機結果（2 台: 7f96ffcb / 604e313a）
+- 難聴（deafness）修正後に対戦を完走
+- ビーコン: 2.0 秒間隔・65 B を確認
+- 正常終了: BYE を送信し、相手側にエラー表示
+- 電源の強制切断: 相手側に接続エラーを表示
+- Cap 未装着時のエラー画面: ユーザーが確認
+- 遠距離対戦、各終了経路での Cap 電源確認、電源断のタイミング測定は **ユーザーの指示でスキップ**
+
+### 22.3 リリースビルド
+```
+docker exec battleship-cp0-build bash -c 'cd /work/build-device && /opt/cmake-venv/bin/cmake . -DAPP_DEBIAN_REVISION=1 -DAPP_MAINTAINER="yutacar <yutacar@users.noreply.github.com>" && /opt/cmake-venv/bin/cmake --build . --config Release -j 8 && /opt/cmake-venv/bin/cpack -G DEB'
+```
+→ dist/battleship_1.1.0-1_arm64.deb（Maintainer / Revision は明示指定）。公開は未実施（ユーザーの指示待ち）。
+

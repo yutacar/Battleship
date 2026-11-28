@@ -35,8 +35,8 @@ namespace battleship::net {
 
 /// Which side of the connection this peer is. Used only (a) as the
 /// deterministic tie-break when both HELLO tie_breaker bytes are equal and
-/// (b) for diagnostics; gameplay is otherwise fully symmetric. Maps to TCP
-/// listen/connect today and to a designated-initiator convention on a future
+/// (b) for diagnostics; gameplay is otherwise fully symmetric. Maps to BLE
+/// peripheral/central and to the designated-initiator convention on the
 /// half-duplex LoRa link.
 enum class SessionRole { Host, Client };
 

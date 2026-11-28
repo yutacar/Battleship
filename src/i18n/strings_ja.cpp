@@ -90,36 +90,26 @@ const Table kJapaneseTable = [] {
     t[static_cast<std::size_t>(StrId::ResultTitle)] = "タイトルへ";
 
     t[static_cast<std::size_t>(StrId::NetworkPlayTitle)] = "通信対戦";
-    t[static_cast<std::size_t>(StrId::NetworkPlayHint)] = "同じWiFiに接続してください";
     t[static_cast<std::size_t>(StrId::NetworkHostGame)] = "ホストする";
     t[static_cast<std::size_t>(StrId::NetworkJoinGame)] = "参加する";
 
     t[static_cast<std::size_t>(StrId::NetLobbyHostingTitle)] = "ホスト中";
     t[static_cast<std::size_t>(StrId::NetLobbyJoiningTitle)] = "接続中";
-    t[static_cast<std::size_t>(StrId::NetLobbyYourAddress)] = "自分のアドレス: %s:%u";
-    t[static_cast<std::size_t>(StrId::NetLobbyConnectingTo)] = "接続中 %s:%u ...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForOpponent)] = "対戦相手の参加を待っています...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForHost)] = "ホストの応答を待っています...";
-    t[static_cast<std::size_t>(StrId::NetCouldNotOpenPort)] = "TCPポートを開けませんでした";
     t[static_cast<std::size_t>(StrId::NetCouldNotStartConnection)] = "接続を開始できませんでした";
 
     t[static_cast<std::size_t>(StrId::NetJoinTitle)] = "対戦に参加";
-    t[static_cast<std::size_t>(StrId::NetJoinSearching)] = "ホストを検索しています...";
-    t[static_cast<std::size_t>(StrId::NetJoinDiscoveryUnavailable)] = "検索不可 - IP直接入力を使用";
-    t[static_cast<std::size_t>(StrId::NetDirectIpButton)] = "IP直接入力";
 
-    t[static_cast<std::size_t>(StrId::NetDirectIpTitle)] = "IP直接入力";
-    t[static_cast<std::size_t>(StrId::NetDirectIpHint)] = "ホストのIPを入力（ポート省略可）";
-    t[static_cast<std::size_t>(StrId::NetDirectIpPlaceholder)] = "192.168.1.20";
-    t[static_cast<std::size_t>(StrId::NetDirectIpInvalidAddress)] = "無効なアドレスです（例: 192.168.1.20）";
 
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "通信エラー";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "OK - タイトルへ";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLost)] = "接続が切断されました";
+    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "WiFiをオフにするとBluetooth対戦が安定します";
+    t[static_cast<std::size_t>(StrId::NetErrorConnectionLostBle)] = "接続が切れました。WiFiをオフにするとBluetooth対戦が安定します";
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "接続方式";
     t[static_cast<std::size_t>(StrId::NetTransportBle)] = "Bluetooth (BLE)";
-    t[static_cast<std::size_t>(StrId::NetTransportWifi)] = "WiFi (LAN)";
     t[static_cast<std::size_t>(StrId::NetTransportLora)] = "LoRa";
     t[static_cast<std::size_t>(StrId::NetTransportDeviceOnly)] = "（実機のみ）";
     t[static_cast<std::size_t>(StrId::NetTransportMethodLine)] = "接続方式: %s";
@@ -127,6 +117,13 @@ const Table kJapaneseTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "%s に接続しています...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "近くのホストを検索しています...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "Bluetoothを利用できません";
+    t[static_cast<std::size_t>(StrId::NetBleOff)] = "Bluetoothがオフです。設定でオンにしてください";
+    t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "LoRa で募集中: %s ...";
+    t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "LoRa のホストを探しています...";
+    t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "Cap LoRa-1262 が見つかりません。電源を切って装着してから再試行してください。";
+    t[static_cast<std::size_t>(StrId::NetLoraUnavailable)] = "LoRa 無線を開始できませんでした。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaQuestion)] = "アンテナを取り付けましたか？付けずに送信すると Cap が壊れることがあります。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaConfirm)] = "Enter: はい   Esc: 戻る";
 
     t[static_cast<std::size_t>(StrId::NetYou)] = "自分";
     t[static_cast<std::size_t>(StrId::NetFoe)] = "相手";

@@ -128,48 +128,45 @@ enum class StrId {
 
     // ---- Network menu ----
     NetworkPlayTitle,
-    NetworkPlayHint,
     NetworkHostGame,
     NetworkJoinGame,
 
     // ---- Net lobby ----
     NetLobbyHostingTitle,
     NetLobbyJoiningTitle,
-    NetLobbyYourAddress,           ///< "Your address: %s:%u"
-    NetLobbyConnectingTo,          ///< "Connecting to %s:%u ..."
     NetLobbyWaitingForOpponent,
     NetLobbyWaitingForHost,
-    NetCouldNotOpenPort,
     NetCouldNotStartConnection,
 
     // ---- Net join ----
     NetJoinTitle,
-    NetJoinSearching,
-    NetJoinDiscoveryUnavailable,
-    NetDirectIpButton,
-
-    // ---- Net direct IP ----
-    NetDirectIpTitle,
-    NetDirectIpHint,
-    NetDirectIpPlaceholder,
-    NetDirectIpInvalidAddress,
 
     // ---- Net error ----
     NetErrorTitle,
     NetErrorOkBackToTitle,
     NetErrorConnectionLost,
+    NetWifiOnWarning,              ///< BLE lobby/join: Wi-Fi is connected, turn it off (shared antenna)
+    NetErrorConnectionLostBle,     ///< BLE match lost: also advises turning Wi-Fi off (shared antenna)
 
     // ---- Net transport select (Phase 6) ----
     NetTransportTitle,             ///< "Connection Type" screen title
     NetTransportBle,               ///< "Bluetooth (BLE)" -- default, top row
-    NetTransportWifi,              ///< "WiFi (LAN)"
-    NetTransportLora,              ///< "LoRa" -- disabled until Phase 8
+    NetTransportLora,              ///< "LoRa" (Phase 8; selectable on every build)
     NetTransportDeviceOnly,        ///< " (device only)" suffix when BATTLESHIP_BLE=0
     NetTransportMethodLine,        ///< "Method: %s" hint on the Host/Join menu
     NetLobbyAdvertisingAs,         ///< "Advertising as %s ..." (BLE host lobby)
     NetLobbyConnectingToBle,       ///< "Connecting to %s ..." (BLE join, no port)
     NetJoinScanningBle,            ///< "Scanning for nearby hosts..." (BLE join)
     NetBleUnavailable,             ///< "Bluetooth unavailable" (adapter/bluetoothd missing)
+    NetBleOff,                     ///< "Bluetooth is off. Turn it on in Settings." (adapter powered off)
+
+    // ---- LoRa (Phase 8, Cap LoRa-1262 / desktop radio simulator) ----
+    NetLoraHostingAs,              ///< "Recruiting over LoRa as %s ..." (LoRa host lobby)
+    NetJoinScanningLora,           ///< "Listening for LoRa hosts..." (LoRa join)
+    NetLoraCapMissing,             ///< Cap not detected (I/O expander / SX1262 silent)
+    NetLoraUnavailable,            ///< any other radio start / link failure
+    NetLoraAntennaQuestion,        ///< one-time antenna-attached confirmation
+    NetLoraAntennaConfirm,         ///< "Enter: Yes   Esc: Back" key hint
 
     // ---- Net battle status ----
     NetYou,                        ///< "You" (shot-source label)

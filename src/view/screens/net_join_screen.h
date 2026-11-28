@@ -10,10 +10,9 @@
 
 namespace screen {
 
-/// Join Game screen (Phase 4): live list of LAN hosts discovered via UDP
-/// broadcast (rebuilt whenever BaseViewModel bumps net_hosts_dirty), plus a
-/// Direct IP fallback for networks where broadcast is filtered (PLAN.md §4)
-/// and a Back button.
+/// Join Game screen: live list of hosts found by the BLE scan or the LoRa
+/// beacon scan (rebuilt whenever BaseViewModel bumps net_hosts_dirty) and a
+/// Back button.
 class NetJoinScreen : public BaseScreen {
 public:
     NetJoinScreen(viewmodel::BaseViewModel& view_model, app::AssetManager& assets);

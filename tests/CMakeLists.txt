@@ -32,10 +32,22 @@ add_executable(battleship_core_tests
     test_net_frame.cpp
     test_net_reliable_link.cpp
     test_net_session.cpp
-    test_net_tcp.cpp
+    test_ble_handshake_policy.cpp
+    test_lora_policy.cpp
+    test_lora_packet.cpp
+    test_lora_link.cpp
+    test_lora_transport.cpp
+    test_lora_cap_power.cpp
+    test_lora_sx1262_math.cpp
+    support/fake_radio_bus.cpp
+    support/net_game_driver.cpp
     test_i18n_catalog.cpp
     test_i18n_settings.cpp
+    test_wifi_state.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/wifi_state.cpp
 )
+
+target_include_directories(battleship_core_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src/platform")
 
 target_link_libraries(battleship_core_tests
     PRIVATE

@@ -46,6 +46,9 @@ void NetErrorScreen::build_content(lv_obj_t* content) {
     // "Connection lost" etc. -- whatever the viewmodel put there when it
     // routed to this page.
     auto* message = lv_label_create(content);
+    // Wrapped: the LoRa "Cap not found" message spans two lines.
+    lv_label_set_long_mode(message, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(message, 296);
     lv_obj_set_style_text_font(message, i18n::font_for_size(12), 0);
     lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(message, LV_ALIGN_CENTER, 0, -4);

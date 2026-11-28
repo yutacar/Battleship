@@ -36,9 +36,10 @@
 #include "core/battleship_core.h"
 #include "i18n/settings.h"
 #include "i18n/strings.h"
-#include "net/discovery.h"
+#include "net/lora/lora_link.h"
+#include "net/lora/lora_transport.h"
+#include "net/lora/radio_factory.h"
 #include "net/net_session.h"
-#include "net/tcp_transport.h"
 #if BATTLESHIP_BLE
 #include "net/ble/ble_transport.h"
 #endif
@@ -56,7 +57,7 @@ namespace viewmodel {
 enum class MatchMode {
     Hotseat,  ///< Two humans sharing the device (Phase 2 flow, with Handover).
     VsAi,     ///< Human (player One) vs AiPlayer (player Two); no Handover.
-    Network,  ///< Remote human over WiFi/TCP (Phase 4). Match state lives in
+    Network,  ///< Remote human over BLE or LoRa. Match state lives in
               ///< a net::NetSession + core::PlayerView instead of core::Game.
 };
 
@@ -254,7 +255,7 @@ public:
     /// equals our own board's shot history).
     battleship::core::MatchSnapshot result_snapshot() const;
 
-    // ---- Network play (Phase 4; connection-type select Phase 6) ----
+    // ---- Network play (BLE or LoRa; connection-type select first) ----
     /// Menu "Network Play" -> connection-type select screen (NetTransport).
     void open_network_menu();
 
@@ -274,25 +275,40 @@ public:
     /// restarts via settings.conf, PLAN.md Phase 6 "選択は設定に永続化").
     i18n::NetTransportPref net_transport_pref() const { return i18n::net_transport_pref(); }
     /// NetTransport screen selection: persists `pref` as the new default and
-    /// advances to the Host/Join submenu.
+    /// advances to the Host/Join submenu. LoRa is the exception while the
+    /// antenna has never been confirmed: nothing is persisted yet and the
+    /// one-time antenna confirmation page (NetAntennaConfirm) is shown
+    /// first (see confirm_lora_antenna()).
     void select_net_transport(i18n::NetTransportPref pref);
-    /// Effective transport for the network flow being set up: the persisted
-    /// preference, downgraded to WiFi when BLE isn't available in this build
-    /// (the preference itself is NOT rewritten -- see i18n::NetTransportPref).
+    /// NetAntennaConfirm "Enter: Yes": persists the antenna confirmation and
+    /// the LoRa preference, then advances to the Host/Join submenu. (Esc on
+    /// that page returns to NetTransport without persisting anything.)
+    void confirm_lora_antenna();
+    /// True when the network flow being set up uses LoRa (persisted
+    /// preference). Unlike BLE this is available on every build: devices
+    /// drive the Cap LoRa-1262, the desktop build a UDP radio simulator
+    /// (net/lora/radio_factory.h, default_radio_backend()).
+    bool net_using_lora() const {
+        return i18n::net_transport_pref() == i18n::NetTransportPref::Lora;
+    }
+    /// True when the network flow being set up uses BLE: the persisted
+    /// preference is BLE AND this build supports it. When BLE is preferred
+    /// but unavailable (desktop build), host/join show the NetBleUnavailable
+    /// error (the preference itself is NOT rewritten -- see
+    /// i18n::NetTransportPref).
     bool net_using_ble() const {
         return ble_available() && i18n::net_transport_pref() == i18n::NetTransportPref::Ble;
     }
-    /// NetworkMenu "Host": listen on TCP (kNetGamePort, or an OS-assigned
-    /// fallback), start UDP announcements, show the lobby screen.
+    /// NetworkMenu "Host": start advertising over the selected transport
+    /// (BLE or LoRa) and show the lobby screen. BLE preferred but not
+    /// available in this build -> NetError with NetBleUnavailable.
     void start_network_host();
-    /// NetworkMenu "Join": start UDP discovery, show the host-list screen.
+    /// NetworkMenu "Join": start scanning over the selected transport and
+    /// show the host-list screen (same BLE-unavailable handling as host).
     void start_network_join();
-    /// NetJoin list entry activated: connect to discovered host `index`.
+    /// NetJoin list entry activated: connect to peer `index` (see
+    /// net_peer_count()).
     void join_host_at(size_t index);
-    /// NetDirectIp confirm: connect to "ip" or "ip:port" (default port
-    /// kNetGamePort). Returns false (and stays on the entry screen) if the
-    /// text is unusable or the connect could not even start.
-    bool join_direct(const char* text);
     /// Cancel from lobby/join screens: tear down all network state, back to
     /// the Network menu.
     void cancel_network();
@@ -301,23 +317,29 @@ public:
     const battleship::net::NetSession* net_session() const { return net_session_.get(); }
     /// True when this peer opened the connection as the host (listener).
     bool net_is_host() const { return net_is_host_; }
-    /// Discovered LAN hosts (valid while the NetJoin screen is up, WiFi).
-    const std::vector<battleship::net::DiscoveredHost>& net_hosts() const {
-        return net_discoverer_.hosts();
-    }
-    /// Transport-agnostic peer list for the NetJoin screen: WiFi -> the UDP
-    /// discovery hosts above, BLE -> the BLE scan results. Both change under
+    /// Transport-agnostic peer list for the NetJoin screen: BLE -> the BLE scan
+    /// results, LoRa -> the link's beacon peers. Both change under
     /// net_hosts_dirty_subject(); join_host_at(index) accepts the same index
     /// space.
     size_t net_peer_count() const;
-    /// Display label for peer `index` ("name (ip:port)" on WiFi,
-    /// "name (address)" on BLE). Empty if out of range.
+    /// Display label for peer `index` ("name (address)" on BLE, "name  -42 dBm" on LoRa). Empty if out of
+    /// range.
     std::string net_peer_label(size_t index) const;
     /// Lobby/status line ("Waiting for opponent...", "Connection lost", ...).
     lv_subject_t* net_status_subject();
     /// Bumped whenever the discovered-host list changes (NetJoin rebuilds
     /// its buttons on this).
     lv_subject_t* net_hosts_dirty_subject();
+    /// 1 while the BLE lobby/join screens should show the "Wi-Fi is on" warning
+    /// (Wi-Fi associated on a BLE flow; the combo chip shares one antenna), else
+    /// 0. Re-evaluated on flow entry and at most once per second from the net
+    /// poll. Test tooling: BATTLESHIP_FORCE_WIFI_WARN=1 forces it on for any
+    /// network flow (screenshots on desktop, where BLE does not exist).
+    lv_subject_t* net_wifi_warn_subject();
+    /// True when BATTLESHIP_FORCE_WIFI_WARN=1 (screenshot tooling): the net
+    /// screens then also present BLE status texts, so desktop (LoRa sim)
+    /// captures look like the BLE flow.
+    static bool net_wifi_warn_forced();
 
     // ---- Boards the active screens should render ----
     // These dispatch on match_mode(): Game boards for hotseat/VsAi, the
@@ -350,21 +372,41 @@ private:
                             const battleship::commentary::CommentContext& context = {});
     // ---- Network internals (Phase 4) ----
     battleship::core::Board& active_placement_board();
-    /// Shared connect path for join_host_at / join_direct: builds the TCP
-    /// transport + client NetSession and moves to the lobby screen.
-    bool net_connect_to(const std::string& ip, uint16_t port);
-    /// 100ms LVGL timer driving all net polling (session, announcer,
-    /// discoverer) plus reactive mirroring of session state into subjects /
+    /// LVGL timer driving all net polling (100ms; 10ms for LoRa, where the
+    /// UI-side work below is still throttled to 100ms) (session, BLE
+    /// scanner, LoRa link) plus reactive mirroring of session state into subjects /
     /// page navigation. Never blocks: every net/ API is non-blocking.
     static void net_poll_timer_cb(lv_timer_t* timer);
     void net_poll();
+    /// Creates the net poll timer if absent: 10 ms for LoRa flows, else 100 ms.
+    void ensure_net_poll_timer();
     /// Applies a newly observed session state change (shot results, phase
     /// changes) to the status line / board-dirty subject / page navigation.
     void net_sync_session_state();
     void net_update_battle_status();
-    /// Tears down session/transport/announcer/discoverer/timer. Safe to call
-    /// redundantly.
+    /// Tears down session/transport/scanner/timer. Safe to call
+    /// redundantly. A LoRa link that was Connected is closed (BYE attempted)
+    /// and handed to the short-lived "closing" holder below instead of being
+    /// destroyed on the spot, so the BYE can still go out.
     void teardown_network();
+
+    // ---- LoRa internals (Phase 8) ----
+    /// Opens the radio (finishing any still-draining closing holder first,
+    /// so two radios are never open at once) and creates the link. On
+    /// failure releases everything, routes to NetError with the mapped
+    /// message and returns false.
+    bool net_lora_open();
+    /// Shows NetError for a radio start failure / link failure.
+    void net_lora_show_error(i18n::StrId message);
+    /// Closes the current LoRa link; keeps the closed objects alive in
+    /// net_lora_closing_ for <= kLoraCloseDrainMs when a BYE may still be
+    /// pending, otherwise destroys them immediately (radio before power).
+    void net_lora_begin_close();
+    /// Destroys the closing holder (if any) right now.
+    void net_lora_finish_closing();
+    static void net_lora_closing_timer_cb(lv_timer_t* timer);
+    /// Monotonic millisecond clock for the LoRa link/transport.
+    static uint64_t net_lora_now_ms();
     /// Test-only autopilot (BATTLESHIP_NET_AUTOPILOT=win|lose, desktop
     /// 2-process verification): auto-places the fleet and auto-fires on our
     /// turn so a full networked match can run unattended. See net_poll().
@@ -398,30 +440,47 @@ private:
     battleship::core::Coord battle_cursor_{0, 0};
     LastShotInfo last_shot_{};
 
-    // ---- Network play (Phase 4 WiFi; Phase 6 BLE) ----
-    std::unique_ptr<battleship::net::TcpTransport> net_transport_;
+    // ---- Network play (BLE) ----
     std::unique_ptr<battleship::net::NetSession> net_session_;
-    battleship::net::UdpAnnouncer net_announcer_;
-    battleship::net::UdpDiscoverer net_discoverer_;
 #if BATTLESHIP_BLE
     std::unique_ptr<battleship::net::BleTransport> net_ble_transport_;
     battleship::net::BleScanner net_ble_scanner_;
     bool net_ble_scanning_ = false;
 #endif
+    // ---- LoRa (Phase 8) ----
+    // Declaration order matters for destruction: radio handle (radio, then
+    // Cap power) must outlive the link, which must outlive the transport;
+    // teardown_network() also resets them explicitly in that order after
+    // the NetSession that references the transport.
+    battleship::net::lora::RadioHandle net_lora_radio_;
+    std::unique_ptr<battleship::net::lora::LoRaLink> net_lora_link_;
+    std::unique_ptr<battleship::net::lora::LoRaTransport> net_lora_transport_;
+    /// True while the CURRENT flow runs over LoRa (see net_flow_ble_).
+    bool net_flow_lora_ = false;
+    /// Link state seen at the previous poll: distinguishes "join attempts
+    /// exhausted" from a radio failure when the link reports Failed.
+    battleship::net::lora::LinkState net_lora_seen_state_ = battleship::net::lora::LinkState::Idle;
+    /// Closed-but-draining LoRa objects (BYE window) after teardown.
+    struct LoraClosing;
+    std::unique_ptr<LoraClosing> net_lora_closing_;
+    lv_timer_t* net_lora_closing_timer_ = nullptr;
+
     /// True while the CURRENT hosting/joining/playing flow runs over BLE
     /// (as opposed to the persisted preference, which the user can change
     /// between matches without touching an in-flight session).
     bool net_flow_ble_ = false;
     lv_timer_t* net_poll_timer_ = nullptr;
     bool net_is_host_ = false;
-    bool net_discovering_ = false;
     /// 0 = off, 1 = "win" (sweep the block the scripted fleet occupies),
     /// 2 = "lose" (fire only at known-water rows). From the
     /// BATTLESHIP_NET_AUTOPILOT env var; test tooling only.
     int net_autopilot_mode_ = 0;
     int net_autopilot_placed_ = 0;
     int net_autopilot_tick_ = 0;
-    bool net_announcing_ = false;
+    uint32_t net_wifi_warn_last_ms_ = 0;
+    /// Re-reads Wi-Fi state into net_wifi_warn_subject_ (see its accessor).
+    void net_refresh_wifi_warning(uint32_t now);
+    uint32_t net_poll_ui_last_ms_ = 0;  // LoRa: last 100 ms-rate net_poll pass
     uint32_t net_seen_change_counter_ = 0;
     battleship::net::SessionPhase net_seen_phase_ = battleship::net::SessionPhase::Handshake;
     size_t net_hosts_signature_ = 0;
@@ -451,8 +510,11 @@ private:
     reactive::IntSubject board_dirty_subject_;
     reactive::StringSubject<64> status_text_subject_;
     reactive::StringSubject<160> commentary_text_subject_;
-    reactive::StringSubject<96> net_status_subject_;
+    // 192 bytes: the longest message (JA NetLoraCapMissing, ~110 bytes of
+    // UTF-8) must fit without being cut mid-character.
+    reactive::StringSubject<192> net_status_subject_;
     reactive::IntSubject net_hosts_dirty_subject_;
+    reactive::IntSubject net_wifi_warn_subject_;
     reactive::IntSubject language_version_subject_;
     reactive::BoolSubject interrupt_modal_subject_;
     reactive::BoolSubject title_quit_armed_subject_;

@@ -7,10 +7,10 @@
  * (PLAN.md §2.2 "信頼性層をアプリ側に持つ"). One frame is in flight at a
  * time per direction; the sender waits for an ACK carrying the same seq
  * before it will send the next frame, retransmitting on timeout up to a
- * bounded number of attempts. This is redundant over TCP (which already
+ * bounded number of attempts. This is redundant over BLE (whose GATT link already
  * guarantees ordered, reliable delivery) but is deliberately implemented at
- * this layer anyway so the exact same code works unmodified over a future
- * lossy, low-bandwidth, half-duplex LoRa transport (PLAN.md §2.2, §7) --
+ * this layer anyway so the exact same code works unmodified over the lossy,
+ * low-bandwidth, half-duplex LoRa transport (PLAN.md §2.2, §7) --
  * only the ITransport underneath changes.
  *
  * Design:

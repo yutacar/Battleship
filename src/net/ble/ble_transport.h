@@ -27,14 +27,19 @@
  * per WriteValue / notification, so a single ATT PDU at the BT 4.2 default
  * MTU always suffices -- no fragmentation layer, no MTU negotiation. The
  * higher layers (FrameDecoder / ReliableLink / NetSession) treat this as an
- * ordinary byte stream exactly like TCP, and the frame decoder's
+ * ordinary byte stream, and the frame decoder's
  * resynchronization tolerates any chunking anyway.
  *
- * Security scope (deliberate, PLAN.md Phase 6): Just Works connections only.
- * No pairing/bonding is requested and link encryption is out of scope for a
- * casual game -- the protocol carries only coordinates/outcomes (never board
- * contents, see messages.h), so a sniffed link reveals nothing the opposing
- * player doesn't already see on their own screen.
+ * Security scope (deliberate, PLAN.md Phase 6): the app itself never asks for
+ * pairing and link encryption is out of scope for a casual game -- the
+ * protocol carries only coordinates/outcomes (never board contents, see
+ * messages.h), so a sniffed link reveals nothing the opposing player doesn't
+ * already see on their own screen. BlueZ may still start pairing (SMP) on its
+ * own (the device image's BLE-MIDI GATT service forces it), so while a BLE game is
+ * open the transport registers an in-app org.bluez.Agent1 that auto-accepts
+ * pairing confirmations: the host accepts any device, the joiner only its
+ * target host; classic AuthorizeService requests are rejected. The resulting
+ * bond is kept by BlueZ (faster reconnects).
  *
  * Platform scope: Linux/BlueZ only. This header is safe to include (and this
  * class safe to name) on any platform -- the implementation is pimpl'd -- but
@@ -66,9 +71,8 @@ inline constexpr const char* kNusServiceUuid = "6e400001-b5a3-f393-e0a9-e50e24dc
 inline constexpr const char* kNusRxCharUuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";  ///< central -> peripheral (Write)
 inline constexpr const char* kNusTxCharUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";  ///< peripheral -> central (Notify)
 
-/// Prefix of the advertised LE local name, mirroring the "BSHIP" magic of
-/// the WiFi UDP discovery payload (net/discovery.h) so joiners can filter
-/// scan results by name as well as by service UUID.
+/// Prefix of the advertised LE local name, so joiners can filter scan
+/// results by name as well as by service UUID.
 inline constexpr const char* kBleNamePrefix = "BSHIP-";
 
 /// One advertising Battleship host as seen by a scanning joiner.
@@ -78,8 +82,13 @@ struct BleScanResult {
     std::string name;         ///< advertised local name ("BSHIP-<host>")
 };
 
+/// Why a BleScanner::start()/BleTransport::start_host() call failed. Only
+/// AdapterOff gets its own UI message (user must turn Bluetooth on); every
+/// other failure is "unavailable".
+enum class BleStartError { None, AdapterOff, Other };
+
 /// Join side: LE discovery with a NUS/name filter, poll-driven host list
-/// (the BLE counterpart of net::UdpDiscoverer).
+/// (the BLE counterpart of the LoRa beacon scan).
 class BleScanner {
 public:
     BleScanner();
@@ -89,7 +98,8 @@ public:
 
     /// Connects to the system bus, powers the first BlueZ adapter and starts
     /// filtered LE discovery. Returns false if there is no usable adapter /
-    /// bluetoothd (UI then shows "Bluetooth unavailable").
+    /// bluetoothd (UI then shows "Bluetooth unavailable"), or if the adapter
+    /// stays powered off (start_error() == AdapterOff -> "Bluetooth is off").
     bool start();
 
     /// Re-enumerates discovered devices at a modest interval and services
@@ -98,12 +108,16 @@ public:
 
     [[nodiscard]] const std::vector<BleScanResult>& results() const;
 
+    /// Reason for the last start() failure (None after success).
+    [[nodiscard]] BleStartError start_error() const { return start_error_; }
+
     /// Stops discovery and releases the bus connection. Idempotent.
     void stop();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    BleStartError start_error_ = BleStartError::None;
 };
 
 /// BLE ITransport. One instance handles either role:
@@ -123,7 +137,13 @@ public:
     /// adapter, no bluetoothd, D-Bus permission denied -- see NOTES.md Phase
     /// 6 for the bluetooth-group requirement). On success state() ==
     /// Connecting until a central subscribes to the TX characteristic.
+    /// Also returns false (start_error() == AdapterOff) when the adapter is
+    /// still powered off after a power-on attempt (e.g. rfkill soft-block):
+    /// BlueZ would otherwise accept the advertisement and advertise nothing.
     bool start_host(const std::string& host_name);
+
+    /// Reason for the last start_host() failure (None after success).
+    [[nodiscard]] BleStartError start_error() const { return start_error_; }
 
     /// Join side: connect to a device previously found by BleScanner.
     /// `device_path` is BleScanResult::device_path. Returns false on
@@ -141,6 +161,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    BleStartError start_error_ = BleStartError::None;
 };
 
 }  // namespace battleship::net

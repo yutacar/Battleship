@@ -89,36 +89,26 @@ const Table kChineseTable = [] {
     t[static_cast<std::size_t>(StrId::ResultTitle)] = "返回标题";
 
     t[static_cast<std::size_t>(StrId::NetworkPlayTitle)] = "联网对战";
-    t[static_cast<std::size_t>(StrId::NetworkPlayHint)] = "双方需连接同一WiFi网络";
     t[static_cast<std::size_t>(StrId::NetworkHostGame)] = "创建主机";
     t[static_cast<std::size_t>(StrId::NetworkJoinGame)] = "加入对战";
 
     t[static_cast<std::size_t>(StrId::NetLobbyHostingTitle)] = "主机中";
     t[static_cast<std::size_t>(StrId::NetLobbyJoiningTitle)] = "连接中";
-    t[static_cast<std::size_t>(StrId::NetLobbyYourAddress)] = "你的地址: %s:%u";
-    t[static_cast<std::size_t>(StrId::NetLobbyConnectingTo)] = "正在连接 %s:%u ...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForOpponent)] = "等待对手加入...";
     t[static_cast<std::size_t>(StrId::NetLobbyWaitingForHost)] = "等待主机响应...";
-    t[static_cast<std::size_t>(StrId::NetCouldNotOpenPort)] = "无法打开TCP端口";
     t[static_cast<std::size_t>(StrId::NetCouldNotStartConnection)] = "无法建立连接";
 
     t[static_cast<std::size_t>(StrId::NetJoinTitle)] = "加入对战";
-    t[static_cast<std::size_t>(StrId::NetJoinSearching)] = "正在搜索主机...";
-    t[static_cast<std::size_t>(StrId::NetJoinDiscoveryUnavailable)] = "搜索不可用 - 请用IP直接输入";
-    t[static_cast<std::size_t>(StrId::NetDirectIpButton)] = "IP直接输入";
 
-    t[static_cast<std::size_t>(StrId::NetDirectIpTitle)] = "IP直接输入";
-    t[static_cast<std::size_t>(StrId::NetDirectIpHint)] = "输入主机IP（端口可选）";
-    t[static_cast<std::size_t>(StrId::NetDirectIpPlaceholder)] = "192.168.1.20";
-    t[static_cast<std::size_t>(StrId::NetDirectIpInvalidAddress)] = "地址无效（例如 192.168.1.20）";
 
     t[static_cast<std::size_t>(StrId::NetErrorTitle)] = "网络错误";
     t[static_cast<std::size_t>(StrId::NetErrorOkBackToTitle)] = "确定 - 返回标题";
     t[static_cast<std::size_t>(StrId::NetErrorConnectionLost)] = "连接已断开";
+    t[static_cast<std::size_t>(StrId::NetWifiOnWarning)] = "WiFi已开启。关闭后蓝牙对战更稳定";
+    t[static_cast<std::size_t>(StrId::NetErrorConnectionLostBle)] = "连接已断开。关闭WiFi可使蓝牙对战更稳定";
 
     t[static_cast<std::size_t>(StrId::NetTransportTitle)] = "连接方式";
     t[static_cast<std::size_t>(StrId::NetTransportBle)] = "蓝牙 (BLE)";
-    t[static_cast<std::size_t>(StrId::NetTransportWifi)] = "WiFi (LAN)";
     t[static_cast<std::size_t>(StrId::NetTransportLora)] = "LoRa";
     t[static_cast<std::size_t>(StrId::NetTransportDeviceOnly)] = "（仅实机）";
     t[static_cast<std::size_t>(StrId::NetTransportMethodLine)] = "连接方式：%s";
@@ -126,6 +116,13 @@ const Table kChineseTable = [] {
     t[static_cast<std::size_t>(StrId::NetLobbyConnectingToBle)] = "正在连接 %s ...";
     t[static_cast<std::size_t>(StrId::NetJoinScanningBle)] = "正在扫描附近的主机...";
     t[static_cast<std::size_t>(StrId::NetBleUnavailable)] = "蓝牙不可用";
+    t[static_cast<std::size_t>(StrId::NetBleOff)] = "蓝牙已关闭，请在设置中开启";
+    t[static_cast<std::size_t>(StrId::NetLoraHostingAs)] = "正在通过 LoRa 招募: %s ...";
+    t[static_cast<std::size_t>(StrId::NetJoinScanningLora)] = "正在搜索 LoRa 主机...";
+    t[static_cast<std::size_t>(StrId::NetLoraCapMissing)] = "未找到 Cap LoRa-1262。请关机安装后重试。";
+    t[static_cast<std::size_t>(StrId::NetLoraUnavailable)] = "无法启动 LoRa 无线。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaQuestion)] = "天线已安装吗？未安装天线发射可能损坏 Cap。";
+    t[static_cast<std::size_t>(StrId::NetLoraAntennaConfirm)] = "Enter: 是   Esc: 返回";
 
     t[static_cast<std::size_t>(StrId::NetYou)] = "你";
     t[static_cast<std::size_t>(StrId::NetFoe)] = "对方";

@@ -6,7 +6,7 @@
 
 cmake_minimum_required(VERSION 3.31)
 
-project(battleship VERSION 1.0.0 LANGUAGES C CXX)
+project(battleship VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,16 @@ if(BATTLESHIP_BLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "BATTLESHIP_BLE=ON requires a Linux target (BlueZ + libsystemd/sd-bus). "
         "Reconfigure with -DBATTLESHIP_BLE=OFF for this platform.")
 endif()
+# BATTLESHIP_LORA_HW: whether to build the Cap LoRa-1262 (SX1262) hardware
+# transport. Hardware access is Linux-only (SPI/GPIO on the CM0), so the
+# default is ON for Linux targets and OFF elsewhere (same rule as BLE).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(BATTLESHIP_LORA_HW_DEFAULT ON)
+else()
+    set(BATTLESHIP_LORA_HW_DEFAULT OFF)
+endif()
+set(BATTLESHIP_LORA_HW ${BATTLESHIP_LORA_HW_DEFAULT} CACHE BOOL
+    "Build the SX1262 LoRa hardware transport (Linux targets only)")
 # Export compile commands
 # Used for IDE IntelliSense
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" FORCE)
@@ -592,13 +602,14 @@ target_link_libraries(battleship_i18n
 )
 
 # ====================================================
-# battleship_net sources (Phase 4)
+# battleship_net sources
 # - Wire frame codec (MAGIC/ver/type/seq/len/payload/CRC16), typed message
 #   payloads, stop-and-wait reliability layer, ITransport abstraction with
-#   Loopback (test, fault-injectable) + TCP (WiFi v1) implementations, UDP
-#   LAN discovery, and the NetSession match state machine over PlayerView.
+#   a Loopback (test, fault-injectable) implementation (BLE and LoRa live in
+#   net/ble and net/lora), and the NetSession match state machine over
+#   PlayerView.
 # - No LVGL dependency: poll-driven, clock-injected, fully unit-testable
-#   headlessly. POSIX sockets only (macOS desktop + CM0 Linux alike).
+#   headlessly.
 # - Namespace: battleship::net
 # ====================================================
 file(GLOB_RECURSE BATTLESHIP_NET_SOURCES CONFIGURE_DEPENDS
@@ -608,6 +619,9 @@ file(GLOB_RECURSE BATTLESHIP_NET_SOURCES CONFIGURE_DEPENDS
 # glob and add it back explicitly below, so a macOS/Windows desktop build
 # never even attempts to compile it (PLAN.md Phase 6 "CMake で Linux のみに隔離").
 list(FILTER BATTLESHIP_NET_SOURCES EXCLUDE REGEX "/src/net/ble/")
+# src/net/lora/sx1262_radio.cpp needs Linux spidev/GPIO/i2c-dev kernel headers:
+# added back below only when BATTLESHIP_LORA_HW is ON.
+list(FILTER BATTLESHIP_NET_SOURCES EXCLUDE REGEX "/src/net/lora/sx1262_radio\\.cpp$")
 
 add_library(battleship_net STATIC
     ${BATTLESHIP_NET_SOURCES}
@@ -631,7 +645,24 @@ target_link_libraries(battleship_net
 target_compile_definitions(battleship_net
     PUBLIC
         BATTLESHIP_BLE=$<BOOL:${BATTLESHIP_BLE}>
+        BATTLESHIP_LORA_HW=$<BOOL:${BATTLESHIP_LORA_HW}>
 )
+
+if(BATTLESHIP_LORA_HW)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "BATTLESHIP_LORA_HW=ON requires a Linux target (spidev/GPIO/i2c-dev). "
+            "Reconfigure with -DBATTLESHIP_LORA_HW=OFF for this platform.")
+    endif()
+    target_sources(battleship_net PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/net/lora/sx1262_radio.cpp"
+    )
+
+    # Hardware bring-up CLI (Task 7). Deliberately has no install() rule so it
+    # never ends up in the .deb; push it to the device by hand.
+    add_executable(battleship_lora_probe tools/lora_probe.cpp)
+    target_link_libraries(battleship_lora_probe PRIVATE battleship_net)
+endif()
 
 if(BATTLESHIP_BLE)
     target_sources(battleship_net PRIVATE

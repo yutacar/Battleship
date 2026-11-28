@@ -45,8 +45,7 @@ constexpr TemplateArity kTemplates[] = {
     {StrId::ResultHitRateLineP1, 3},
     {StrId::ResultHitRateLineP2, 3},
     {StrId::ResultTotalTurns, 1},
-    {StrId::NetLobbyYourAddress, 2},
-    {StrId::NetLobbyConnectingTo, 2},
+    {StrId::NetLoraHostingAs, 1},
     {StrId::BattleStatsLine, 4},
     {StrId::BattleStatsSunkLine, 2},
     {StrId::KeyGuidePlacementMove, 1},
@@ -152,4 +151,62 @@ TEST(I18nCatalog, SetLanguageSwitchesActiveTable) {
     EXPECT_STREQ(i18n::tr(StrId::MenuOnePlayer), "单人对战");
 
     i18n::set_language(Lang::EN);  // restore default for subsequent tests
+}
+
+TEST(I18nCatalog, LoraStringsDefinedInEveryLanguage) {
+    // Phase 8 (LoRa): explicit guard on top of the exhaustive non-empty
+    // check, so a LoRa entry accidentally left as a placeholder (or with a
+    // stray "Coming soon" marker) is caught by name.
+    constexpr StrId kLoraIds[] = {
+        StrId::NetTransportLora,   StrId::NetLoraHostingAs,      StrId::NetJoinScanningLora,
+        StrId::NetLoraCapMissing,  StrId::NetLoraUnavailable,    StrId::NetLoraAntennaQuestion,
+        StrId::NetLoraAntennaConfirm,
+    };
+    for (Lang lang : kAllLangs) {
+        i18n::set_language(lang);
+        for (StrId id : kLoraIds) {
+            const char* text = i18n::tr(id);
+            ASSERT_NE(text, nullptr);
+            EXPECT_GT(std::strlen(text), 0u) << "lang=" << static_cast<int>(lang) << " id=" << static_cast<int>(id);
+            EXPECT_EQ(std::strstr(text, "Coming soon"), nullptr) << text;
+        }
+    }
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetLoraUnavailable), "LoRa radio could not start.");
+    EXPECT_EQ(i18n::trf(StrId::NetLoraHostingAs, "BSHIP-abc"), "Recruiting over LoRa as BSHIP-abc ...");
+}
+
+TEST(I18nCatalog, BleOffStringDefinedInEveryLanguage) {
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "Bluetooth is off. Turn it on in Settings.");
+    i18n::set_language(Lang::JA);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "Bluetoothがオフです。設定でオンにしてください");
+    i18n::set_language(Lang::ZH);
+    EXPECT_STREQ(i18n::tr(StrId::NetBleOff), "蓝牙已关闭，请在设置中开启");
+    i18n::set_language(Lang::EN);
+}
+
+TEST(I18nCatalog, BleConnectionLostHintDefinedInEveryLanguage) {
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetErrorConnectionLostBle),
+                 "Connection lost. Turning Wi-Fi off makes Bluetooth play more stable.");
+    i18n::set_language(Lang::JA);
+    EXPECT_STREQ(i18n::tr(StrId::NetErrorConnectionLostBle),
+                 "接続が切れました。WiFiをオフにするとBluetooth対戦が安定します");
+    i18n::set_language(Lang::ZH);
+    EXPECT_STREQ(i18n::tr(StrId::NetErrorConnectionLostBle),
+                 "连接已断开。关闭WiFi可使蓝牙对战更稳定");
+    i18n::set_language(Lang::EN);
+}
+
+TEST(I18nCatalog, WifiOnWarningDefinedInEveryLanguage) {
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning),
+                 "Turn Wi-Fi off for a stable Bluetooth match.");
+    i18n::set_language(Lang::JA);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning),
+                 "WiFiをオフにするとBluetooth対戦が安定します");
+    i18n::set_language(Lang::ZH);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning), "WiFi已开启。关闭后蓝牙对战更稳定");
+    i18n::set_language(Lang::EN);
 }

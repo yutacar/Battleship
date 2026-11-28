@@ -21,19 +21,21 @@ namespace i18n {
 
 /// Preferred 2-player connection method (Phase 6, PLAN.md §2.2 "マッチング
 /// UI の接続方式選択"). Persisted alongside the language in the same
-/// settings.conf ("transport=ble|wifi") -- which is why it lives in this
-/// settings module despite not being an i18n concern: the file is a single
+/// settings.conf ("transport=ble|lora"; a legacy "wifi" value loads as Ble)
+/// -- which is why it lives in this settings module despite not being an
+/// i18n concern: the file is a single
 /// flat key=value store and exactly one writer must own it (both save_*()
 /// functions rewrite the whole file with every known key). Default is Ble --
 /// BLE is the product's default connection method (PLAN.md Rev.3). On
 /// builds without BLE support (BATTLESHIP_BLE=0, e.g. the macOS desktop
 /// build) the UI treats Ble as "unavailable on this build" WITHOUT
 /// rewriting the preference, so the same settings file still preselects BLE
-/// on the device. LoRa (Phase 8) gains an enum value when its transport
-/// actually exists; until then it is a disabled UI row only.
+/// on the device. Lora ("transport=lora") is available on every
+/// build: the device drives the Cap LoRa-1262, the desktop build a UDP
+/// loopback-multicast radio simulator (net/lora/radio_factory.h).
 enum class NetTransportPref {
     Ble,
-    Wifi,
+    Lora,
 };
 
 /// Loads the persisted language (if any) and calls set_language() with it;
@@ -65,6 +67,19 @@ void set_net_transport_pref(NetTransportPref pref);
 /// making the choice the preselected default next time (PLAN.md Phase 6:
 /// "選択は設定に永続化（次回デフォルト）").
 void save_net_transport_pref(NetTransportPref pref);
+
+/// Whether the user has confirmed (once) that the Cap LoRa-1262 antenna is
+/// attached -- transmitting without it can damage the Cap, so the LoRa flow
+/// asks before the first use and never again once confirmed. Persisted as
+/// "antenna_confirmed=1" (false/absent until then). In-memory value seeded
+/// by load_settings().
+bool antenna_confirmed();
+
+/// In-memory-only setter (no persistence), for tests.
+void set_antenna_confirmed(bool confirmed);
+
+/// Persists `confirmed` (and applies it in-memory).
+void save_antenna_confirmed(bool confirmed);
 
 /// Path the settings file is read from / written to. Exposed for tests
 /// (which override HOME/XDG_CONFIG_HOME via environment before calling)

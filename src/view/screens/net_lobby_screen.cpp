@@ -41,9 +41,27 @@ void NetLobbyScreen::build_content(lv_obj_t* content) {
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
     reactive::bind_theme(title, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
 
-    // Host: "Your address: <ip>:<port>". Client: "Connecting to <ip>:<port>".
+
+    // Wi-Fi-on warning (BLE flows only; shared antenna). Hidden unless the
+    // ViewModel's wifi-warn subject is 1; wrapped so JA/ZH/EN fit two lines.
+    auto* wifi_warn = lv_label_create(content);
+    lv_label_set_long_mode(wifi_warn, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(wifi_warn, 300);
+    lv_obj_set_style_text_align(wifi_warn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(wifi_warn, i18n::font_for_size(12), 0);
+    lv_obj_set_style_text_color(wifi_warn, lv_color_hex(0xd2691e), 0);
+    lv_label_set_text(wifi_warn, i18n::tr(i18n::StrId::NetWifiOnWarning));
+    lv_obj_align(wifi_warn, LV_ALIGN_TOP_MID, 0, 31);
+    reactive::bind_flag(wifi_warn, view_model().net_wifi_warn_subject(), LV_OBJ_FLAG_HIDDEN, 0);
+
+    // Host: "Advertising as BSHIP-<host>". Client: "Connecting to <peer>".
     // Kept live via the subject so e.g. an error message can replace it.
     auto* status = lv_label_create(content);
+    // Wrapped (and centered): "Recruiting over LoRa as BSHIP-<host> ..." can
+    // exceed one line with a long host name.
+    lv_label_set_long_mode(status, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(status, 300);
+    lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(status, i18n::font_for_size(12), 0);
     lv_obj_align(status, LV_ALIGN_CENTER, 0, -14);
     reactive::bind_theme(status, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
