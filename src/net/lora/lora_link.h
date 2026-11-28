@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <random>
 #include <string>
 #include <vector>
@@ -54,13 +55,23 @@ struct LinkTiming {
 
 class LoRaLink {
 public:
-    LoRaLink(IRadio& radio, Japan920Policy policy, std::uint32_t seed, LinkTiming timing = {});
+    // `clock_ms` (optional) is the same monotonic millisecond clock the caller
+    // passes to poll()/close(). It is read right after the radio accepted a
+    // transmission, so the ARIB pause is measured from the real start of the
+    // emission (carrier sense runs inside try_start_transmit and takes ~5-9 ms).
+    // Without it the poll()/close() timestamp is used (virtual-time tests).
+    LoRaLink(IRadio& radio, Japan920Policy policy, std::uint32_t seed, LinkTiming timing = {},
+             std::function<std::uint64_t()> clock_ms = {});
 
     void start_host(const std::string& host_name, std::uint64_t now_ms);
     void start_scan(std::uint64_t now_ms);
     // Starts joining the given session (it need not be in peers()). Returns
     // false unless the link is Idle or Scanning.
     bool join(std::uint16_t session_id, std::uint64_t now_ms);
+    // Services the radio and the state machine. Returns promptly even when the
+    // radio faults: a RadioEvent::Failed ends this poll's event loop, and a
+    // radio that is no longer ready() (latched SPI/GPIO fault) moves the link
+    // to Failed (unless Closed).
     void poll(std::uint64_t now_ms);
 
     LinkState state() const { return state_; }
@@ -97,6 +108,7 @@ private:
     Japan920Policy policy_;
     std::mt19937 rng_;
     LinkTiming timing_;
+    std::function<std::uint64_t()> clock_ms_;
 
     LinkState state_ = LinkState::Idle;
     std::uint16_t session_id_ = 0;
@@ -107,6 +119,9 @@ private:
     std::deque<Entry> tx_queue_;
     bool tx_in_flight_ = false;
     std::uint64_t next_tx_ms_ = 0;
+    // Latest time handed to the policy (a record() stamp can be ahead of the
+    // caller's now_ms); the policy's clock must never go backwards.
+    std::uint64_t policy_clock_ms_ = 0;
     std::uint64_t last_rx_ms_ = 0;
     bool have_rx_ = false;
     std::uint64_t next_beacon_ms_ = 0;

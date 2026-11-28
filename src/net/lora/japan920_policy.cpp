@@ -77,7 +77,8 @@ void Japan920Policy::record(RadioTick now_ms, std::size_t bytes) noexcept {
         return;
     }
     next_transmit_ms_ = saturating_add(
-        saturating_add(now_ms, airtime_ms(bytes)), config_.pause_after_emission_ms);
+        saturating_add(saturating_add(now_ms, airtime_ms(bytes)), config_.pause_after_emission_ms),
+        kEmissionPauseSafetyMarginMs);
 }
 
 bool Japan920Policy::valid() const noexcept {

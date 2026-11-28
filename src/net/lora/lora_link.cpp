@@ -7,6 +7,7 @@
 #include "net/lora/lora_link.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace battleship::net::lora {
 
@@ -16,8 +17,9 @@ bool is_control(PacketType t) {
 }
 } // namespace
 
-LoRaLink::LoRaLink(IRadio& radio, Japan920Policy policy, std::uint32_t seed, LinkTiming timing)
-    : radio_(radio), policy_(policy), rng_(seed), timing_(timing) {}
+LoRaLink::LoRaLink(IRadio& radio, Japan920Policy policy, std::uint32_t seed, LinkTiming timing,
+                   std::function<std::uint64_t()> clock_ms)
+    : radio_(radio), policy_(policy), rng_(seed), timing_(timing), clock_ms_(std::move(clock_ms)) {}
 
 void LoRaLink::start_host(const std::string& host_name, std::uint64_t now_ms) {
     host_name_ = host_name.substr(0, kMaxHostNameLen);
@@ -177,7 +179,10 @@ void LoRaLink::pump_tx(std::uint64_t now_ms) {
     // Turnaround guard (see LinkTiming::rx_turnaround_ms): defer, never drop.
     if (have_rx_ && now_ms < last_rx_ms_ + timing_.rx_turnaround_ms) return;
     const Entry& e = tx_queue_.front();
-    const TxDecision d = policy_.evaluate(now_ms, e.bytes.size());
+    // A previous record() stamp may be a few ms ahead of now_ms (e.g. close()
+    // called with an older snapshot); never feed the policy a clock regression.
+    policy_clock_ms_ = std::max(policy_clock_ms_, now_ms);
+    const TxDecision d = policy_.evaluate(policy_clock_ms_, e.bytes.size());
     if (d.status == TxDecisionStatus::Deferred) {
         next_tx_ms_ = d.not_before_ms;
         return;
@@ -194,7 +199,11 @@ void LoRaLink::pump_tx(std::uint64_t now_ms) {
     }
     switch (radio_.try_start_transmit(e.bytes.data(), e.bytes.size())) {
     case RadioStart::Started:
-        policy_.record(now_ms, e.bytes.size());
+        // ARIB pause from the END of this emission: stamp the policy with the
+        // clock read after the radio started transmitting (carrier sense and
+        // SPI happen inside try_start_transmit), not with now_ms.
+        if (clock_ms_) policy_clock_ms_ = std::max(policy_clock_ms_, clock_ms_());
+        policy_.record(policy_clock_ms_, e.bytes.size());
         tx_in_flight_ = true;
         tx_queue_.pop_front();
         break;
@@ -228,8 +237,20 @@ void LoRaLink::poll(std::uint64_t now_ms) {
                 handle(*p, r.rssi_dbm, now_ms);
             }
         } else if (r.event == RadioEvent::Failed) {
+            // A transmission that failed (e.g. SX1262 TX timeout) is over;
+            // its packet is lost and the upper layer's retransmit covers it.
+            // Failed always ends this poll: a latched fault keeps returning
+            // Failed forever, so looping on it would hang the caller.
             tx_in_flight_ = false;
+            break;
         }
+    }
+    if (!radio_.ready()) {
+        // Latched radio fault: nothing more can be sent or received.
+        tx_queue_.clear();
+        tx_in_flight_ = false;
+        if (state_ != LinkState::Closed) state_ = LinkState::Failed;
+        return;
     }
 
     switch (state_) {

@@ -7,8 +7,11 @@
 #include "net/lora/lora_link.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <random>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -312,7 +315,7 @@ TEST(LoraLink, PolicyDeferralRespected) {
         for (const auto& rec : bus.tx_log()) {
             if (rec.radio != r) continue;
             if (!first) {
-                EXPECT_GE(rec.start_ms, prev + Japan920Policy{}.airtime_ms(prev_bytes) + 50u);
+                EXPECT_GE(rec.start_ms, prev + Japan920Policy{}.airtime_ms(prev_bytes) + 50u + kEmissionPauseSafetyMarginMs);
             }
             prev = rec.start_ms;
             prev_bytes = rec.bytes.size();
@@ -412,16 +415,26 @@ FakeBusConfig deaf_cfg(bool deaf = true) {
 // same iteration; a nonzero phase makes the host's reply start while the
 // client is still deaf (same-phase polling hides this because the host's reply
 // starts in the very tick the client re-arms).
+// `join_after_ms` delays the join after the first beacon was seen, so the
+// host's reply is not held back by its own post-beacon ARIB pause (which can
+// by coincidence push the ACCEPT past the client's deaf window).
 // Returns true when both links are Connected within 20 s.
-bool deaf_connect(FakeRadioBus& bus, DeafNode& host, DeafNode& client, std::uint64_t client_phase = 0) {
+bool deaf_connect(FakeRadioBus& bus, DeafNode& host, DeafNode& client, std::uint64_t client_phase = 0,
+                  std::uint64_t join_after_ms = 0) {
     host.link.start_host("HOST", 0);
     client.link.start_scan(0);
     bool joined = false;
+    bool seen = false;
+    std::uint64_t seen_ms = 0;
     for (std::uint64_t t = 0; t < 20000; ++t) {
         bus.advance_to(t);
         if (t % client.poll_ms == client_phase) {
             client.link.poll(t);
-            if (!joined && !client.link.peers().empty()) {
+            if (!seen && !client.link.peers().empty()) {
+                seen = true;
+                seen_ms = t;
+            }
+            if (!joined && seen && t >= seen_ms + join_after_ms) {
                 joined = client.link.join(client.link.peers()[0].session_id, t);
             }
         }
@@ -456,10 +469,20 @@ TEST(LoraLinkDeaf, WithoutGuardAndSlowPollJoinFails) {
 }
 
 TEST(LoraLinkDeaf, OffsetPollPhaseNeedsTurnaroundGuard) {
+    // The join is delayed 500 ms past the first beacon so the host answers the
+    // JOIN at once instead of after its post-beacon ARIB pause.
+    constexpr std::uint64_t kJoinAfterMs = 500;
     for (std::uint64_t phase : {1, 2, 3}) {
         SCOPED_TRACE("client phase " + std::to_string(phase));
         {
             LinkTiming timing; // guard 40
+            FakeRadioBus bus(deaf_cfg());
+            DeafNode host(bus, 1, timing, 10);
+            DeafNode client(bus, 2, timing, 10);
+            EXPECT_TRUE(deaf_connect(bus, host, client, phase, kJoinAfterMs));
+        }
+        {
+            LinkTiming timing; // guard 40, immediate join
             FakeRadioBus bus(deaf_cfg());
             DeafNode host(bus, 1, timing, 10);
             DeafNode client(bus, 2, timing, 10);
@@ -471,7 +494,7 @@ TEST(LoraLinkDeaf, OffsetPollPhaseNeedsTurnaroundGuard) {
             FakeRadioBus bus(deaf_cfg());
             DeafNode host(bus, 1, timing, 10);
             DeafNode client(bus, 2, timing, 10);
-            EXPECT_FALSE(deaf_connect(bus, host, client, phase));
+            EXPECT_FALSE(deaf_connect(bus, host, client, phase, kJoinAfterMs));
         }
     }
 }
@@ -508,4 +531,192 @@ TEST(LoraLinkDeaf, DataFlowsBothWaysUnderDeafness) {
     }
     EXPECT_EQ(got_h, b);
     EXPECT_EQ(got_c, a);
+}
+
+// ---- Radio faults --------------------------------------------------------------
+//
+// Sx1262Radio latches a fault on any SPI/GPIO error: ready() goes false and
+// poll() returns RadioEvent::Failed on every call from then on. poll() runs on
+// the UI thread, so the link must return promptly and fail instead of looping.
+
+TEST(LoraLink, LatchedRadioFaultFailsLinkWithoutHanging) {
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    ASSERT_EQ(host.link.state(), LinkState::Connected);
+    const auto a = payload13(3);
+    ASSERT_TRUE(host.link.send_data(a.data(), a.size()));
+
+    host.radio.latch_fault_after_polls(0);
+    const std::size_t before = host.radio.poll_calls();
+    const std::size_t tx_before = bus.tx_log().size();
+    t += kStep;
+    bus.advance_to(t);
+    host.link.poll(t);
+    EXPECT_LE(host.radio.poll_calls() - before, 1u) << "poll() kept looping on RadioEvent::Failed";
+    EXPECT_FALSE(host.radio.ready());
+    EXPECT_EQ(host.link.state(), LinkState::Failed);
+    EXPECT_FALSE(host.link.send_data(a.data(), a.size()));
+
+    // Later polls return at once without touching the dead radio.
+    const std::size_t after_fail = host.radio.poll_calls();
+    run(bus, {&host.link}, t + kStep, t + 1000);
+    EXPECT_EQ(host.radio.poll_calls(), after_fail);
+    EXPECT_EQ(host.link.state(), LinkState::Failed);
+    EXPECT_EQ(bus.tx_log().size(), tx_before); // the queued DATA was never sent
+}
+
+TEST(LoraLink, LatchedFaultWhileTransmittingFailsLink) {
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    run(bus, {&host.link, &client.link}, t + kStep, t + 1000);
+    t += 1000;
+    const auto a = payload13(4);
+    ASSERT_TRUE(host.link.send_data(a.data(), a.size()));
+    const std::size_t tx_before = bus.tx_log().size();
+    host.link.poll(t); // DATA goes on air
+    ASSERT_EQ(bus.tx_log().size(), tx_before + 1);
+
+    host.radio.latch_fault_after_polls(0); // e.g. BUSY stuck while servicing TxDone
+    const std::size_t before = host.radio.poll_calls();
+    host.link.poll(t + 1);
+    EXPECT_LE(host.radio.poll_calls() - before, 1u);
+    EXPECT_EQ(host.link.state(), LinkState::Failed);
+}
+
+TEST(LoraLink, LatchedFaultAfterCloseStaysClosed) {
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    host.link.close(t);
+    ASSERT_EQ(host.link.state(), LinkState::Closed);
+    host.radio.latch_fault_after_polls(0);
+    const std::size_t before = host.radio.poll_calls();
+    host.link.poll(t + kStep);
+    EXPECT_LE(host.radio.poll_calls() - before, 1u);
+    EXPECT_EQ(host.link.state(), LinkState::Closed); // Closed never turns into Failed
+}
+
+TEST(LoraLink, OneOffTxFailureKeepsLinkUsable) {
+    // A single Failed (SX1262 TX timeout) with the radio still ready loses
+    // that packet but must not fail the link.
+    FakeRadioBus bus;
+    Node host(bus, 1);
+    Node client(bus, 2);
+    std::uint64_t t = connect(bus, host, client);
+    run(bus, {&host.link, &client.link}, t + kStep, t + 1000);
+    t += 1000;
+    const auto a = payload13(5), b = payload13(60);
+    ASSERT_TRUE(host.link.send_data(a.data(), a.size()));
+    host.link.poll(t); // DATA a goes on air ...
+    host.radio.fail_next_poll(); // ... and times out
+    host.link.poll(t + 1);
+    EXPECT_EQ(host.link.state(), LinkState::Connected);
+    EXPECT_TRUE(host.radio.ready());
+
+    ASSERT_TRUE(host.link.send_data(b.data(), b.size()));
+    std::vector<std::uint8_t> got;
+    for (std::uint64_t u = t + kStep; u <= t + 2000; u += kStep) {
+        bus.advance_to(u);
+        host.link.poll(u);
+        client.link.poll(u);
+        client.link.take_received(got);
+    }
+    EXPECT_EQ(got, b);
+    EXPECT_EQ(host.link.state(), LinkState::Connected);
+}
+
+// ---- ARIB pause reference point ------------------------------------------------
+//
+// try_start_transmit() runs carrier sense (>= 5 ms, up to ~9 ms measured) before
+// the emission starts. The 50 ms pause must count from the END of the emission,
+// so the policy has to be stamped with a clock read after the start, not with
+// the poll() timestamp.
+
+namespace {
+
+// Wraps a FakeRadio; calls `before_start` (which may advance the shared clock
+// and the bus) before every transmit attempt, like a slow carrier sense.
+class SlowStartRadio : public IRadio {
+public:
+    SlowStartRadio(FakeRadio& inner, std::function<void()> before_start)
+        : inner_(inner), before_start_(std::move(before_start)) {}
+    bool ready() const override { return inner_.ready(); }
+    RadioStart try_start_transmit(const std::uint8_t* data, std::size_t size) override {
+        before_start_();
+        return inner_.try_start_transmit(data, size);
+    }
+    RadioPoll poll(std::uint8_t* dst, std::size_t cap) override { return inner_.poll(dst, cap); }
+    void shutdown() override { inner_.shutdown(); }
+
+private:
+    FakeRadio& inner_;
+    std::function<void()> before_start_;
+};
+
+} // namespace
+
+TEST(LoraLink, EmissionPauseCountsFromActualTransmitStart) {
+    FakeRadioBus bus;
+    std::uint64_t clock = 0;
+    FakeRadio& raw = bus.add_radio();
+    int attempts = 0;
+    // Odd attempts take 9 ms of carrier sense, even ones none: a slow first
+    // start followed by a fast second one is the case that shortens the gap
+    // when the pause is measured from the poll() timestamp.
+    SlowStartRadio slow(raw, [&] {
+        if (++attempts % 2 == 1) {
+            clock += 9;
+            bus.advance_to(clock);
+        }
+    });
+    LoRaLink host(slow, Japan920Policy{}, 1, LinkTiming{}, [&] { return clock; });
+    FakeRadio& client_radio = bus.add_radio();
+    LoRaLink client(client_radio, Japan920Policy{}, 2);
+
+    auto step = [&] {
+        clock += kStep;
+        bus.advance_to(clock);
+        host.poll(clock);
+        client.poll(clock);
+    };
+    host.start_host("HOST", clock);
+    client.start_scan(clock);
+    bool joined = false;
+    while (clock < 10000 && !(host.state() == LinkState::Connected && client.state() == LinkState::Connected)) {
+        step();
+        if (!joined && !client.peers().empty()) joined = client.join(client.peers()[0].session_id, clock);
+    }
+    ASSERT_EQ(host.state(), LinkState::Connected);
+
+    const std::uint64_t burst = clock;
+    for (int i = 0; i < 8; ++i) {
+        const auto a = payload13(static_cast<std::uint8_t>(i));
+        ASSERT_TRUE(host.send_data(a.data(), a.size()));
+    }
+    while (clock < burst + 4000) step();
+
+    const Japan920Policy policy;
+    const std::uint64_t pause = Japan920PolicyConfig{}.pause_after_emission_ms + kEmissionPauseSafetyMarginMs;
+    std::uint64_t prev = 0;
+    std::size_t prev_bytes = 0;
+    bool first = true;
+    int n = 0;
+    for (const auto& rec : bus.tx_log()) {
+        if (rec.radio != &raw || rec.start_ms < burst) continue;
+        if (!first) {
+            // start_ms is the real start (the bus clock after carrier sense).
+            EXPECT_GE(rec.start_ms, prev + policy.airtime_ms(prev_bytes) + pause)
+                << "gap after the emission that started at " << prev;
+        }
+        prev = rec.start_ms;
+        prev_bytes = rec.bytes.size();
+        first = false;
+        ++n;
+    }
+    EXPECT_EQ(n, 8);
 }

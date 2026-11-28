@@ -12,11 +12,11 @@
 namespace battleship::net::lora::testing {
 
 bool FakeRadio::ready() const {
-    return ready_;
+    return ready_ && !faulted_;
 }
 
 RadioStart FakeRadio::try_start_transmit(const std::uint8_t* data, std::size_t size) {
-    if (!ready_) return RadioStart::Failed;
+    if (!ready()) return RadioStart::Failed;
     if (size == 0 || size > kMaxRadioPacket) return RadioStart::Failed;
     if (bus_.busy_ || tx_pending_) return RadioStart::Busy;
     if (bus_.cfg_.carrier_sense) {
@@ -37,7 +37,25 @@ RadioStart FakeRadio::try_start_transmit(const std::uint8_t* data, std::size_t s
 
 RadioPoll FakeRadio::poll(std::uint8_t* dst, std::size_t cap) {
     RadioPoll r;
+    ++poll_calls_;
+    if (fault_countdown_ == 0) {
+        fault_countdown_ = -1;
+        faulted_ = true;
+    } else if (fault_countdown_ > 0) {
+        --fault_countdown_;
+    }
+    if (faulted_) {
+        if (++faulted_polls_ > kFaultedPollEscape) return r; // escape hatch (see header)
+        r.event = RadioEvent::Failed;
+        return r;
+    }
     if (!ready_) return r;
+    if (fail_once_) {
+        fail_once_ = false;
+        tx_pending_ = false;
+        r.event = RadioEvent::Failed;
+        return r;
+    }
     if (tx_done_ > 0) {
         --tx_done_;
         if (tx_done_ == 0 && deaf_) {

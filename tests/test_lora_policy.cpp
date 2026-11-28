@@ -61,14 +61,32 @@ TEST(LoraPolicy, AirtimeSf7) {
 }
 
 TEST(LoraPolicy, PauseIsMeasuredFromEmissionEnd) {
+    // Reference point: record() is stamped with the time the emission
+    // started; the next start is allowed at stamp + airtime (= emission end)
+    // + 50 ms ARIB pause + kEmissionPauseSafetyMarginMs.
     Japan920Policy policy;
     const RadioTick air = policy.airtime_ms(65);
+    const RadioTick gap = Japan920PolicyConfig{}.pause_after_emission_ms + kEmissionPauseSafetyMarginMs;
+    ASSERT_EQ(Japan920PolicyConfig{}.pause_after_emission_ms, 50U);
+    ASSERT_EQ(gap, 55U);
     ASSERT_EQ(policy.evaluate(0, 65).status, TxDecisionStatus::Allowed);
     policy.record(0, 65);
-    const auto early = policy.evaluate(air + 49, 18);
+    const auto early = policy.evaluate(air + gap - 1, 18);
     EXPECT_EQ(early.status, TxDecisionStatus::Deferred);
-    EXPECT_EQ(early.not_before_ms, air + 50);
-    EXPECT_EQ(policy.evaluate(air + 50, 18).status, TxDecisionStatus::Allowed);
+    EXPECT_EQ(early.not_before_ms, air + gap);
+    EXPECT_EQ(policy.evaluate(air + gap, 18).status, TxDecisionStatus::Allowed);
+}
+
+TEST(LoraPolicy, PauseFollowsTheRecordStampNotTheEvaluateTime) {
+    // evaluate() at 0, the radio's carrier sense takes 9 ms, record() is
+    // stamped at 9: the pause counts from the emission that started at 9.
+    Japan920Policy policy;
+    const RadioTick air = policy.airtime_ms(18);
+    ASSERT_EQ(policy.evaluate(0, 18).status, TxDecisionStatus::Allowed);
+    policy.record(9, 18);
+    const auto d = policy.evaluate(9, 18);
+    ASSERT_EQ(d.status, TxDecisionStatus::Deferred);
+    EXPECT_EQ(d.not_before_ms, 9 + air + 50 + kEmissionPauseSafetyMarginMs);
 }
 
 TEST(LoraPolicy, NoHourlyCapOnCh24to32) {
@@ -83,7 +101,7 @@ TEST(LoraPolicy, NoHourlyCapOnCh24to32) {
         total += air;
         const auto next = policy.evaluate(t, 18);
         ASSERT_EQ(next.status, TxDecisionStatus::Deferred);
-        ASSERT_EQ(next.not_before_ms, t + air + 50);
+        ASSERT_EQ(next.not_before_ms, t + air + 50 + kEmissionPauseSafetyMarginMs);
         t = next.not_before_ms;
     }
     EXPECT_GT(total, 360'000U);

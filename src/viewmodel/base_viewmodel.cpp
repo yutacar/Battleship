@@ -1249,8 +1249,11 @@ bool BaseViewModel::net_lora_open() {
                     ? "hardware"
                     : "udp-sim");
     net_lora_radio_ = std::move(handle);  // target is empty: nothing destroyed
+    // The link reads the clock again right after each transmission starts
+    // (ARIB pause measured from the end of our own emission).
     net_lora_link_ = std::make_unique<battleship::net::lora::LoRaLink>(
-        *net_lora_radio_.radio, battleship::net::lora::Japan920Policy{}, rng_());
+        *net_lora_radio_.radio, battleship::net::lora::Japan920Policy{}, rng_(),
+        battleship::net::lora::LinkTiming{}, &BaseViewModel::net_lora_now_ms);
     net_lora_seen_state_ = battleship::net::lora::LinkState::Idle;
     net_flow_lora_ = true;
     return true;

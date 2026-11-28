@@ -385,3 +385,25 @@ TEST(LoraUdpSim, DoesNotReceiveOwnPacket) {
     }
     EXPECT_TRUE(tx_done);
 }
+
+TEST(LoRaTransport, LatchedRadioFaultEndsSessionAsDisconnected) {
+    // A latched SX1262 fault mid-game: the poll returns, the link fails and
+    // the session reports Disconnected (the app then shows its connection
+    // error screen and tears the radio down, releasing the Cap power).
+    Rig rig(0.0, 4);
+    ASSERT_TRUE(rig.connect());
+    rig.make_sessions(4);
+    reach_battle(rig, 4);
+
+    rig.radio_host.latch_fault_after_polls(0);
+    const std::size_t before = rig.radio_host.poll_calls();
+    const uint64_t t = rig.now + kStep;
+    rig.now = t;
+    rig.bus.advance_to(t);
+    rig.host->poll(static_cast<uint32_t>(t)); // NetSession -> LoRaTransport -> LoRaLink
+    EXPECT_LE(rig.radio_host.poll_calls() - before, 1u) << "poll() kept looping on RadioEvent::Failed";
+    EXPECT_EQ(rig.link_host.state(), LinkState::Failed);
+    EXPECT_EQ(rig.transport_host.state(), net::TransportState::Disconnected);
+    rig.host->poll(static_cast<uint32_t>(t + kStep));
+    EXPECT_EQ(rig.host->phase(), net::SessionPhase::Disconnected);
+}

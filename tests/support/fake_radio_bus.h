@@ -54,6 +54,20 @@ public:
     RadioPoll poll(std::uint8_t* dst, std::size_t cap) override;
     void shutdown() override;
 
+    // Test hook modelling Sx1262Radio's latched SPI/GPIO fault: after `n`
+    // more poll() calls (0 = the very next one) poll() latches the fault and
+    // returns RadioEvent::Failed; from then on ready() is false and every
+    // poll() returns Failed again. To keep a caller that loops on Failed from
+    // hanging the test run, poll() gives up with Idle after
+    // kFaultedPollEscape faulted calls (the test then fails on poll_calls()).
+    void latch_fault_after_polls(int n) { fault_countdown_ = n; }
+    // Test hook modelling a one-off SX1262 TX timeout: the next poll() aborts
+    // any transmission in progress (nothing is delivered) and returns
+    // RadioEvent::Failed once; the radio stays ready.
+    void fail_next_poll() { fail_once_ = true; }
+    std::size_t poll_calls() const { return poll_calls_; }
+    static constexpr std::size_t kFaultedPollEscape = 10000;
+
 private:
     friend class FakeRadioBus;
     FakeRadio(FakeRadioBus& bus, std::int16_t rssi) : bus_(bus), rssi_(rssi) {}
@@ -74,6 +88,11 @@ private:
     bool tx_pending_ = false; // transmitting, delivery not yet done
     bool deaf_ = false;       // deaf_until_poll: TxDone ended, RX not re-armed yet
     int tx_done_ = 0;         // TxDone events not yet polled
+    int fault_countdown_ = -1; // latch_fault_after_polls(); -1 = never
+    bool faulted_ = false;
+    bool fail_once_ = false;
+    std::size_t poll_calls_ = 0;
+    std::size_t faulted_polls_ = 0;
     Tx tx_;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> tx_history_;
     std::deque<Rx> rx_;

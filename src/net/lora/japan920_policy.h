@@ -20,6 +20,15 @@ namespace battleship::net::lora {
 
 using RadioTick = std::uint64_t;
 
+// Extra pause added on top of Japan920PolicyConfig::pause_after_emission_ms
+// (so 50 + 5 = 55 ms effective). The policy is stamped with a millisecond
+// clock read just after the radio accepted SetTx, while the real emission
+// starts a little later (SPI transfer, PA ramp) and both clock reads are
+// truncated to whole milliseconds. This margin absorbs that SPI/clock
+// granularity so the ARIB >= 50 ms pause after the END of our own emission
+// holds by construction, not only on average.
+constexpr RadioTick kEmissionPauseSafetyMarginMs = 5U;
+
 struct Japan920Profile {
     std::uint32_t frequency_hz{921'800'000U};
     std::uint32_t bandwidth_hz{125'000U};
@@ -35,7 +44,8 @@ struct Japan920Profile {
 struct Japan920PolicyConfig {
     Japan920Profile profile;
     // ARIB STD-T108 (channels 24-32): pause measured from the END of our own
-    // emission before the next one may start.
+    // emission before the next one may start. kEmissionPauseSafetyMarginMs is
+    // added on top when the next start is scheduled.
     RadioTick pause_after_emission_ms{50U};
 };
 
@@ -49,6 +59,9 @@ struct TxDecision {
 // Enforces the per-emission limit (calculated airtime must be < 4 s, enforced
 // as <= 400 ms here) and the pause after the previous emission's end.
 // Listen-before-talk (carrier sense >= 5 ms) is the transport's responsibility.
+// record() must be stamped with a clock read AFTER the radio started the
+// emission (not the time evaluate() was called before carrier sense), because
+// the next start is scheduled at stamp + airtime + pause + safety margin.
 // record() of a decision that is not Allowed is a protocol error and
 // invalidates the policy.
 class Japan920Policy {
