@@ -145,6 +145,7 @@ enum class StrId {
     NetErrorTitle,
     NetErrorOkBackToTitle,
     NetErrorConnectionLost,
+    NetWifiOnWarning,              ///< BLE lobby/join: Wi-Fi is connected, turn it off (shared antenna)
     NetErrorConnectionLostBle,     ///< BLE match lost: also advises turning Wi-Fi off (shared antenna)
 
     // ---- Net transport select (Phase 6) ----

@@ -16,6 +16,7 @@
 #include "net/host_name.h"
 #include "net/ble/ble_transport.h"  // kBleNamePrefix only (header is safe on every platform)
 #include "net/lora/japan920_policy.h"
+#include "wifi_state.h"
 
 using battleship::core::Coord;
 using battleship::core::MatchStatus;
@@ -150,6 +151,7 @@ BaseViewModel::BaseViewModel()
       commentary_text_subject_(""),
       net_status_subject_(""),
       net_hosts_dirty_subject_(0),
+      net_wifi_warn_subject_(0),
       language_version_subject_(0) {
     if (commentator_) {
         // i18n::load_settings() (app.cpp, before this constructor runs) has
@@ -916,6 +918,21 @@ lv_subject_t* BaseViewModel::net_hosts_dirty_subject() {
     return net_hosts_dirty_subject_.native();
 }
 
+lv_subject_t* BaseViewModel::net_wifi_warn_subject() {
+    return net_wifi_warn_subject_.native();
+}
+
+void BaseViewModel::net_refresh_wifi_warning(uint32_t now) {
+    net_wifi_warn_last_ms_ = now;
+    const char* force = std::getenv("BATTLESHIP_FORCE_WIFI_WARN");
+    const bool forced = force && force[0] == '1';
+    const bool warn = (net_flow_ble_ && platform::wifi_connected()) || forced;
+    const int32_t value = warn ? 1 : 0;
+    if (net_wifi_warn_subject_.value() != value) {
+        net_wifi_warn_subject_.set(value);
+    }
+}
+
 void BaseViewModel::open_network_menu() {
     teardown_network();
     // Network Play starts at the connection-type screen (BLE default /
@@ -968,6 +985,7 @@ void BaseViewModel::start_network_host() {
             i18n::trf(i18n::StrId::NetLoraHostingAs, advertised.c_str()).c_str());
 
         ensure_net_poll_timer();
+        net_refresh_wifi_warning(lv_tick_get());  // 0 on LoRa unless forced for screenshots
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -999,6 +1017,7 @@ void BaseViewModel::start_network_host() {
             i18n::trf(i18n::StrId::NetLobbyAdvertisingAs, advertised.c_str()).c_str());
 
         ensure_net_poll_timer();
+        net_refresh_wifi_warning(lv_tick_get());
         show_page(model::AppPage::NetLobby);
         return;
     }
@@ -1022,6 +1041,7 @@ void BaseViewModel::start_network_join() {
         net_hosts_signature_ = 0;
         net_status_subject_.set(i18n::tr(i18n::StrId::NetJoinScanningLora));
         ensure_net_poll_timer();
+        net_refresh_wifi_warning(lv_tick_get());  // 0 on LoRa unless forced for screenshots
         net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
         show_page(model::AppPage::NetJoin);
         return;
@@ -1043,6 +1063,7 @@ void BaseViewModel::start_network_join() {
         net_status_subject_.set(i18n::tr(net_ble_scanning_ ? i18n::StrId::NetJoinScanningBle
                                                            : i18n::StrId::NetBleUnavailable));
         ensure_net_poll_timer();
+        net_refresh_wifi_warning(lv_tick_get());
         net_hosts_dirty_subject_.set(net_hosts_dirty_subject_.value() + 1);
         show_page(model::AppPage::NetJoin);
         return;
@@ -1177,6 +1198,7 @@ void BaseViewModel::teardown_network() {
     net_ble_transport_.reset();
 #endif
     net_flow_ble_ = false;
+    net_wifi_warn_subject_.set(0);
     net_own_result_text_.clear();
     net_incoming_result_text_.clear();
     net_hosts_signature_ = 0;
@@ -1307,6 +1329,11 @@ void BaseViewModel::net_poll_timer_cb(lv_timer_t* timer) {
 
 void BaseViewModel::net_poll() {
     const uint32_t now = lv_tick_get();
+
+    // Cheap sysfs read, at most once per second.
+    if (now - net_wifi_warn_last_ms_ >= 1000) {
+        net_refresh_wifi_warning(now);
+    }
 
 #if BATTLESHIP_BLE
     if (net_ble_scanning_) {

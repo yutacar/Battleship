@@ -133,7 +133,7 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     // or two Battleship hosts are in range at a time.
     auto* list = lv_obj_create(content);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, LV_PCT(100), 100);
+    lv_obj_set_size(list, LV_PCT(100), 76);  // 3 rows; leaves room for the Wi-Fi warning
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 28);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -149,6 +149,19 @@ void NetJoinScreen::build_content(lv_obj_t* content) {
     lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 64);
     reactive::bind_theme(empty, view_model().dark_mode_subject(), reactive::ThemeRole::Text);
     ui->empty_label = empty;
+
+
+    // Wi-Fi-on warning (BLE flows only; shared antenna). Hidden unless the
+    // ViewModel's wifi-warn subject is 1; wrapped so JA/ZH/EN fit two lines.
+    auto* wifi_warn = lv_label_create(content);
+    lv_label_set_long_mode(wifi_warn, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_width(wifi_warn, 300);
+    lv_obj_set_style_text_align(wifi_warn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(wifi_warn, i18n::font_for_size(12), 0);
+    lv_obj_set_style_text_color(wifi_warn, lv_color_hex(0xd2691e), 0);
+    lv_label_set_text(wifi_warn, i18n::tr(i18n::StrId::NetWifiOnWarning));
+    lv_obj_align(wifi_warn, LV_ALIGN_BOTTOM_MID, 0, -40);
+    reactive::bind_flag(wifi_warn, view_model().net_wifi_warn_subject(), LV_OBJ_FLAG_HIDDEN, 0);
 
     // Bottom row: Back (scan results are the only join path).
     auto* buttons = lv_obj_create(content);

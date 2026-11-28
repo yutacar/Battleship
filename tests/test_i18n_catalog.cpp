@@ -198,3 +198,15 @@ TEST(I18nCatalog, BleConnectionLostHintDefinedInEveryLanguage) {
                  "连接已断开。关闭WiFi可使蓝牙对战更稳定");
     i18n::set_language(Lang::EN);
 }
+
+TEST(I18nCatalog, WifiOnWarningDefinedInEveryLanguage) {
+    i18n::set_language(Lang::EN);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning),
+                 "Wi-Fi is on. Turn it off for a stable Bluetooth match.");
+    i18n::set_language(Lang::JA);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning),
+                 "WiFiがオンです。オフにするとBluetooth対戦が安定します");
+    i18n::set_language(Lang::ZH);
+    EXPECT_STREQ(i18n::tr(StrId::NetWifiOnWarning), "WiFi已开启。关闭后蓝牙对战更稳定");
+    i18n::set_language(Lang::EN);
+}

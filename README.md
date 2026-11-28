@@ -52,7 +52,7 @@ The app appears in APPLaunch after installation.
 
 ### Notes for playing on real hardware
 
-- **BLE (default 2-player mode)** requires the device's Bluetooth stack (BlueZ) to be running and the app's user account to be in the `bluetooth` group (`sudo usermod -aG bluetooth <user>`, then re-login). Without this, BLE features report "Bluetooth unavailable" instead of crashing. If a device doesn't show up when scanning, also check `rfkill unblock bluetooth`. BLE play works best with Wi-Fi turned off (the Bluetooth and Wi-Fi radios share one antenna); the app retries the connection automatically.
+- **BLE (default 2-player mode)** requires the device's Bluetooth stack (BlueZ) to be running and the app's user account to be in the `bluetooth` group (`sudo usermod -aG bluetooth <user>`, then re-login). Without this, BLE features report "Bluetooth unavailable" instead of crashing. If a device doesn't show up when scanning, also check `rfkill unblock bluetooth`. BLE play works best with Wi-Fi turned off (the Bluetooth and Wi-Fi radios share one antenna), so the app warns on the host/join screens when Wi-Fi is connected; it also retries the connection automatically.
 - **WiFi 2-player mode** uses LAN-only discovery (UDP broadcast on port 35353, TCP game traffic on port 35354) — both devices must be on the same access point/subnet. No data ever leaves the LAN.
 - The game runs entirely offline; no telemetry or external network calls are made outside of an explicit WiFi match.
 - Battle commentary is a fixed template-phrase system (no local LLM is used or required) — see [Architecture](#architecture) below.

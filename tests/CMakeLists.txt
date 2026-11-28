@@ -43,9 +43,11 @@ add_executable(battleship_core_tests
     support/net_game_driver.cpp
     test_i18n_catalog.cpp
     test_i18n_settings.cpp
+    test_wifi_state.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/wifi_state.cpp
 )
 
-target_include_directories(battleship_core_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(battleship_core_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/src/platform")
 
 target_link_libraries(battleship_core_tests
     PRIVATE

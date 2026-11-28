@@ -330,6 +330,12 @@ public:
     /// Bumped whenever the discovered-host list changes (NetJoin rebuilds
     /// its buttons on this).
     lv_subject_t* net_hosts_dirty_subject();
+    /// 1 while the BLE lobby/join screens should show the "Wi-Fi is on" warning
+    /// (Wi-Fi associated on a BLE flow; the combo chip shares one antenna), else
+    /// 0. Re-evaluated on flow entry and at most once per second from the net
+    /// poll. Test tooling: BATTLESHIP_FORCE_WIFI_WARN=1 forces it on for any
+    /// network flow (screenshots on desktop, where BLE does not exist).
+    lv_subject_t* net_wifi_warn_subject();
 
     // ---- Boards the active screens should render ----
     // These dispatch on match_mode(): Game boards for hotseat/VsAi, the
@@ -467,6 +473,9 @@ private:
     int net_autopilot_mode_ = 0;
     int net_autopilot_placed_ = 0;
     int net_autopilot_tick_ = 0;
+    uint32_t net_wifi_warn_last_ms_ = 0;
+    /// Re-reads Wi-Fi state into net_wifi_warn_subject_ (see its accessor).
+    void net_refresh_wifi_warning(uint32_t now);
     uint32_t net_poll_ui_last_ms_ = 0;  // LoRa: last 100 ms-rate net_poll pass
     uint32_t net_seen_change_counter_ = 0;
     battleship::net::SessionPhase net_seen_phase_ = battleship::net::SessionPhase::Handshake;
@@ -501,6 +510,7 @@ private:
     // UTF-8) must fit without being cut mid-character.
     reactive::StringSubject<192> net_status_subject_;
     reactive::IntSubject net_hosts_dirty_subject_;
+    reactive::IntSubject net_wifi_warn_subject_;
     reactive::IntSubject language_version_subject_;
     reactive::BoolSubject interrupt_modal_subject_;
     reactive::BoolSubject title_quit_armed_subject_;
