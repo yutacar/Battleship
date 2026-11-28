@@ -14,9 +14,9 @@ A classic naval-combat game built for the [M5Stack CardputerZero](https://cardpu
 | --- | --- | --- |
 | ![Menu](docs/screenshots/i18n_en_01_menu.png) | ![Difficulty](docs/screenshots/difficulty_select.png) | ![Placement](docs/screenshots/placement_dense_en.png) |
 
-| Battle | Result | Network play |
+| Battle | Result | LoRa play |
 | --- | --- | --- |
-| ![Battle](docs/screenshots/battle_dense_en.png) | ![Result](docs/screenshots/i18n_en_08_result.png) | ![Network](docs/screenshots/i18n_en_12_net_host_lobby.png) |
+| ![Battle](docs/screenshots/battle_dense_en.png) | ![Result](docs/screenshots/i18n_en_08_result.png) | ![LoRa host lobby](docs/screenshots/lora_en_04_host_lobby.png) |
 
 More screenshots, including the Japanese and Simplified Chinese UI, are in [`docs/screenshots/`](docs/screenshots/) (see the `i18n_ja_*` and `i18n_zh_*` files).
 
