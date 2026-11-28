@@ -32,6 +32,7 @@ add_executable(battleship_core_tests
     test_net_frame.cpp
     test_net_reliable_link.cpp
     test_net_session.cpp
+    test_ble_handshake_policy.cpp
     test_lora_policy.cpp
     test_lora_packet.cpp
     test_lora_link.cpp

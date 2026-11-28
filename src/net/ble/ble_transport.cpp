@@ -18,11 +18,13 @@
  */
 #include "net/ble/ble_transport.h"
 
+#include "net/ble/ble_handshake_policy.h"
 #include "net/messages.h"  // kBleSingleWriteLimit (single write/notify invariant)
 
 #include <systemd/sd-bus.h>
 
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,6 +49,13 @@ constexpr const char* kServicePath = "/com/battleship/gatt/service0";
 constexpr const char* kRxCharPath = "/com/battleship/gatt/service0/char_rx";
 constexpr const char* kTxCharPath = "/com/battleship/gatt/service0/char_tx";
 constexpr const char* kAdvPath = "/com/battleship/advertisement0";
+
+/// Monotonic milliseconds (the transport's poll() carries no clock).
+uint64_t monotonic_ms() {
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000u + static_cast<uint64_t>(ts.tv_nsec) / 1000000u;
+}
 
 /// Drains all pending D-Bus traffic without blocking. Every incoming method
 /// call (WriteValue/StartNotify/...), async reply and signal is dispatched
@@ -367,6 +376,11 @@ struct BleTransport::Impl {
     bool char_query_in_flight = false;
     bool start_notify_sent = false;
     uint64_t last_resolve_poll_us = 0;
+    uint64_t start_ms = 0;               ///< start_join() time (handshake timeout)
+
+    // ---- host: central seen on the link before the handshake completes ----
+    std::string central_path;            ///< Device1 that went Connected=true
+    uint64_t central_since_ms = 0;
 
     std::vector<uint8_t> recv_buffer;
 
@@ -407,6 +421,9 @@ struct BleTransport::Impl {
         resolve_query_in_flight = false;
         char_query_in_flight = false;
         start_notify_sent = false;
+        start_ms = 0;
+        central_path.clear();
+        central_since_ms = 0;
         device_path.clear();
         rx_char_path.clear();
         tx_char_path.clear();
@@ -559,6 +576,76 @@ struct BleTransport::Impl {
             self->fail();
         } else {
             self->adv_registered = true;
+        }
+        return 0;
+    }
+
+    // ---------------- link-loss watch (both roles) ----------------
+
+    /// org.bluez.Device1 PropertiesChanged. Join: our peer device (match is
+    /// path-filtered). Host: any device under the adapter; the first one to
+    /// go Connected=true while we are still Connecting is taken to be the
+    /// central, and its drop before the TX subscription fails the transport.
+    static int device_props_changed_cb(sd_bus_message* m, void* userdata, sd_bus_error*) {
+        auto* self = static_cast<Impl*>(userdata);
+        const char* iface = nullptr;
+        if (sd_bus_message_read_basic(m, 's', &iface) < 0 || !iface ||
+            std::strcmp(iface, kDeviceIface) != 0) {
+            return 0;
+        }
+        bool has_connected = false, connected = false, has_resolved = false, resolved = false;
+        if (sd_bus_message_enter_container(m, 'a', "{sv}") <= 0) {
+            return 0;
+        }
+        while (sd_bus_message_enter_container(m, 'e', "sv") > 0) {
+            const char* key = nullptr;
+            sd_bus_message_read_basic(m, 's', &key);
+            bool* has = nullptr;
+            bool* val = nullptr;
+            if (key && std::strcmp(key, "Connected") == 0) {
+                has = &has_connected;
+                val = &connected;
+            } else if (key && std::strcmp(key, "ServicesResolved") == 0) {
+                has = &has_resolved;
+                val = &resolved;
+            }
+            int b = 0;
+            if (has && sd_bus_message_enter_container(m, 'v', "b") > 0) {
+                sd_bus_message_read_basic(m, 'b', &b);
+                sd_bus_message_exit_container(m);
+                *has = true;
+                *val = b != 0;
+            } else {
+                sd_bus_message_skip(m, "v");
+            }
+            sd_bus_message_exit_container(m);
+        }
+        sd_bus_message_exit_container(m);
+
+        if (self->state == TransportState::Disconnected) {
+            return 0;
+        }
+        if (self->role == Role::Join) {
+            if (ble_device_link_lost(has_connected, connected, has_resolved, resolved,
+                                     self->services_resolved)) {
+                self->fail();
+            }
+        } else if (self->role == Role::Host && has_connected) {
+            const char* path = sd_bus_message_get_path(m);
+            if (!path) {
+                return 0;
+            }
+            if (connected) {
+                if (self->state == TransportState::Connecting && self->central_path.empty()) {
+                    self->central_path = path;
+                    self->central_since_ms = monotonic_ms();
+                }
+            } else if (self->central_path == path) {
+                // Central vanished: before the handshake that would leave the
+                // lobby on "connecting" forever; after it, peer loss (the
+                // StopNotify path may not fire on a supervision timeout).
+                self->fail();
+            }
         }
         return 0;
     }
@@ -819,6 +906,18 @@ bool BleTransport::start_host(const std::string& host_name) {
         return false;
     }
 
+    {
+        const std::string match =
+            "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',"
+            "member='PropertiesChanged',path_namespace='" +
+            impl_->adapter + "',arg0='org.bluez.Device1'";
+        if (sd_bus_add_match(impl_->bus, nullptr, match.c_str(), &Impl::device_props_changed_cb,
+                             impl_.get()) < 0) {
+            impl_->shutdown();
+            return false;
+        }
+    }
+
     impl_->state = TransportState::Connecting;
     pump(impl_->bus);
     return true;
@@ -841,6 +940,21 @@ bool BleTransport::start_join(const std::string& device_path) {
 
     impl_->role = Impl::Role::Join;
     impl_->device_path = device_path;
+    impl_->start_ms = monotonic_ms();
+
+    // Watch the peer for link loss before issuing Connect so a drop during
+    // GATT discovery cannot slip past.
+    {
+        const std::string match =
+            "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',"
+            "member='PropertiesChanged',path='" +
+            device_path + "',arg0='org.bluez.Device1'";
+        if (sd_bus_add_match(impl_->bus, nullptr, match.c_str(), &Impl::device_props_changed_cb,
+                             impl_.get()) < 0) {
+            impl_->shutdown();
+            return false;
+        }
+    }
 
     const int rc =
         sd_bus_call_method_async(impl_->bus, nullptr, kBluez, device_path.c_str(), kDeviceIface,
@@ -861,6 +975,21 @@ void BleTransport::poll() {
         return;
     }
     pump(impl.bus);
+    if (impl.state == TransportState::Disconnected) {
+        return;
+    }
+
+    // Overall handshake budget: joiner from start_join(); host from the
+    // moment a central connected (waiting for a lobby is unbounded).
+    if (impl.state == TransportState::Connecting) {
+        const uint64_t since = impl.role == Impl::Role::Join ? impl.start_ms
+                               : !impl.central_path.empty() ? impl.central_since_ms
+                                                            : 0;
+        if (since != 0 && ble_handshake_timed_out(since, monotonic_ms())) {
+            impl.fail();
+            return;
+        }
+    }
 
     if (impl.role == Impl::Role::Join && impl.state == TransportState::Connecting) {
         // Drive the connect pipeline: ServicesResolved -> characteristic
