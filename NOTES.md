@@ -2349,3 +2349,31 @@ battleship・chainled を含む全 40 アプリを削除**した。このため 
 - `listen` でのビーコン広告文確認（アプリのホストビーコンが必要）
 - Cap 未装着時のエラー UI、各アプリ終了経路での電源解放、長押し Esc 時にランチャーが送るシグナル
   （アプリのインストールが必要）
+
+## 22. 1.1.0-1 リリース（2026-11-28）
+
+### 22.1 変更概要
+- **LoRa 対戦を追加**（Cap LoRa-1262 / SX1262、921.8MHz・BW125kHz・SF7・≤13dBm・LBT 5ms/-90dBm）。
+  詳細は §21 と docs/superpowers/specs/2026-11-27-lora-transport-design.md
+- **WiFi 対戦を削除**（caae4cc）。Network Play は BLE（既定）または LoRa のみ。実行時ソケットは
+  LoRa UDP シミュレータ（デスクトップ / `BATTLESHIP_LORA_SIM=1` のみ）以外に残っていない
+- **BLE 修正**（efc5c66..1abb210）: LE 専用接続、BlueZ Agent1 による自動ペアリング、Join 側の
+  自動リトライ、Wi-Fi 接続中の警告表示。既知の制限: Wi-Fi 接続中は BLE 対戦不可（アンテナ共用）。
+  2 台のペアリングは初回の BLE 対戦時に自動で行われ保持される
+- **ストア権限の変更**: `network` true→false、`additional_hardware` false→true。
+  説明文は WiFi の記述を除去し、LoRa（任意、Cap LoRa-1262 装着時）を追記（3 言語）
+
+### 22.2 LoRa L3 実機結果（2 台: 7f96ffcb / 604e313a）
+- 難聴（deafness）修正後に対戦を完走
+- ビーコン: 2.0 秒間隔・65 B を確認
+- 正常終了: BYE を送信し、相手側にエラー表示
+- 電源の強制切断: 相手側に接続エラーを表示
+- Cap 未装着時のエラー画面: ユーザーが確認
+- 遠距離対戦、各終了経路での Cap 電源確認、電源断のタイミング測定は **ユーザーの指示でスキップ**
+
+### 22.3 リリースビルド
+```
+docker exec battleship-cp0-build bash -c 'cd /work/build-device && /opt/cmake-venv/bin/cmake . -DAPP_DEBIAN_REVISION=1 -DAPP_MAINTAINER="yutacar <yutacar@users.noreply.github.com>" && /opt/cmake-venv/bin/cmake --build . --config Release -j 8 && /opt/cmake-venv/bin/cpack -G DEB'
+```
+→ dist/battleship_1.1.0-1_arm64.deb（Maintainer / Revision は明示指定）。公開は未実施（ユーザーの指示待ち）。
+

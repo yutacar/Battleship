@@ -2,7 +2,7 @@
 
 クラシック海戦ゲーム（バトルシップ）を CardputerZero 向けに開発する。
 
-- **2人対戦**: CardputerZero 同士の通信対戦。**デフォルトは BLE**（内蔵 BT 4.2、AP 不要・追加ハード不要）。**オプションとして WiFi (TCP/IP)**（開発・デスクトップ検証はこちらが主）、**将来オプションとして LoRa** を差し替え可能に設計する（Rev.3 で BLE をデフォルトに変更）
+- **2人対戦**: CardputerZero 同士の通信対戦。**デフォルトは BLE**（内蔵 BT 4.2、AP 不要・追加ハード不要）。**オプションとして LoRa（Cap LoRa-1262 (SX1262) — 1.1.0 で実装済み、[設計書](docs/superpowers/specs/2026-11-27-lora-transport-design.md)）**（Rev.3 で BLE をデフォルトに変更。当初あった WiFi (TCP/IP) 対戦は 1.1.0 で削除）
 - **1人対戦**: **古典的な確率密度 AI**（十分強く即応答）が対戦相手。**ローカル LLM は解説役**（戦況分析・解説コメント）を担う
 
 ---
@@ -69,7 +69,7 @@
 | `LoopbackTransport` | 実装済み（開発） | 同一プロセス内テスト・AI 自動対戦 |
 | `TcpTransport` | 実装済み（**オプション**） | WiFi 経由。ホスト側が待受、UDP ブロードキャストで LAN 内対戦相手を発見（同一 AP 前提）。**デスクトップ開発・自動検証の主経路**としても維持 |
 | `BleTransport` | **Phase 6（デフォルト）** | **BT 4.2 内蔵を活用（追加ハード・AP 不要）— 製品のデフォルト接続方式**。Linux 側は BlueZ（D-Bus API）。GATT の Nordic UART Service (NUS) 互換（TX/RX キャラクタリスティック）でバイトストリーム化し、Host=ペリフェラル（アドバタイズ）/ Join=セントラル（スキャン）。ペイロードは数バイトなので MTU 20B でも1フレーム1通知で収まる。**Mac デスクトップでは実 BLE 検証不可** → 実装はデバイス向け、ロジックはヘッドレステスト、実通信は実機2台で検証 |
-| `LoRaSerialTransport` | Phase 8（将来オプション） | M5Stack Unit LoRaE220-JP（920MHz・Grove UART・技適対応）。Linux からはシリアルポート。透過モードで P2P。**インターフェースは確定済み、実装のみ後日追加** |
+| `LoRaTransport` | **Cap LoRa-1262 (SX1262) — 1.1.0 で実装済み**（[設計書](docs/superpowers/specs/2026-11-27-lora-transport-design.md)）。`TcpTransport`（WiFi）は 1.1.0 で削除 | （当初計画: M5Stack Unit LoRaE220-JP（920MHz・Grove UART・技適対応）。Linux からはシリアルポート。透過モードで P2P。**インターフェースは確定済み、実装のみ後日追加**） |
 
 **マッチング UI の接続方式選択**: Network Play 画面で接続方式を選択 — **デフォルト選択は BLE**、オプションで WiFi、LoRa は Phase 8 まで無効表示。
 
@@ -120,7 +120,7 @@
 | **5. 多言語対応（i18n）** | **英語を標準**とし、設定画面で**日本語・中国語（簡体字）**に切替可能に。文字列カタログ層の導入、CJK フォント対応、言語設定の永続化。LLM 解説・定型文も選択言語に追従 | 3言語で全画面が正しく表示・切替でき、再起動後も言語設定が保持される |
 | **6. BLE 対戦（デフォルト接続方式）** | `BleTransport` 実装（BlueZ D-Bus、NUS 互換 GATT、Host=ペリフェラル/Join=セントラル）+ マッチング画面に接続方式選択（**デフォルト BLE** / WiFi / LoRa=無効表示）。プロトコル・信頼性層・NetSession は無変更で流用。デスクトップはモック/Loopback でヘッドレステスト、デバイスビルドで BlueZ 実装をコンパイル | ヘッドレステスト green + デバイスビルド成功（実機2台での BLE 実対戦はユーザー実機到着後に実施） |
 | **7. パッケージング** | aarch64 デバイスビルド、**APPLaunch 規約準拠**の .deb 化、czdev による提出（下記「Phase 7 の提出要件」参照） | prepublish check 全パス、実機で APPLaunch から起動、czdev publish で PR 作成 |
-| **8. LoRa 対応（将来オプション）** | `LoRaSerialTransport` 実装（Unit LoRaE220-JP ×2、透過モード）。接続方式選択の LoRa を有効化 | LoRa 経由で1ゲーム完走 |
+| **8. LoRa 対応** | **Cap LoRa-1262 (SX1262) — 1.1.0 で実装済み**（[設計書](docs/superpowers/specs/2026-11-27-lora-transport-design.md)）。当初案の Unit LoRaE220-JP は不採用。WiFi 対戦（Phase 4 の TcpTransport）は 1.1.0 で削除。接続方式選択の LoRa を有効化 | LoRa 経由で1ゲーム完走 |
 
 ### Phase 5（i18n）の設計方針
 - **文字列カタログ**: 文字列 ID → 言語別テーブルの軽量な自前実装（gettext 等は導入しない）。UI 実装時からハードコード文字列をカタログ経由に置換

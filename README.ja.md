@@ -3,7 +3,7 @@
 [M5Stack CardputerZero](https://cardputerzero.github.io/)（320×170、LVGL v9.5 + C++/CMake）向けに作られた、古典的な海戦ゲームです。
 
 - **1人用**: ローカル（オンデバイス）の確率密度 AI と対戦（クラウド・LLM 不使用）。難易度3段階、戦況を実況する定型文コメント機能（設定でON/OFF切替可能）。
-- **2人用**: もう1台の CardputerZero と **BLE**（デフォルト、アクセスポイント不要）、**WiFi**（LAN内）、または1台での交互プレイ（**ホットシート**）で対戦。
+- **2人用**: もう1台の CardputerZero と **BLE**（デフォルト、アクセスポイント不要）、オプションで **LoRa**（Cap LoRa-1262 使用）、または1台での交互プレイ（**ホットシート**）で対戦。
 - **対応言語**: English / 日本語 / 简体中文 — 設定画面からいつでも切り替え可能（再起動不要）。
 
 English README is available at [README.md](README.md).
@@ -43,9 +43,9 @@ English README is available at [README.md](README.md).
 **手動インストール**（`.deb` を別途ビルド・入手した場合）:
 
 ```shell
-sudo dpkg -i battleship_1.0.0_arm64.deb
+sudo dpkg -i battleship_1.1.0-1_arm64.deb
 # 依存パッケージの解決も同時に行いたい場合:
-sudo apt install --no-install-recommends ./battleship_1.0.0_arm64.deb
+sudo apt install --no-install-recommends ./battleship_1.1.0-1_arm64.deb
 ```
 
 インストール後、APPLaunch にアプリが表示されます。
@@ -53,9 +53,19 @@ sudo apt install --no-install-recommends ./battleship_1.0.0_arm64.deb
 ### 実機でプレイする際の注意
 
 - **BLE（デフォルトの2人用モード）** を使うには、端末の Bluetooth スタック（BlueZ）が起動していること、およびアプリを実行するユーザーが `bluetooth` グループに属していることが必要です（`sudo usermod -aG bluetooth <user>` 実行後に再ログイン）。設定が無い場合、アプリはクラッシュせず「Bluetooth unavailable」と表示されます。スキャンしても相手が見つからない場合は `rfkill unblock bluetooth` も確認してください。
-- **WiFi 2人用モード** は LAN 内のみの探索（UDPブロードキャスト: ポート35353、対戦通信: TCPポート35354）を使うため、両端末が同一アクセスポイント/サブネットに接続されている必要があります。データが LAN 外に送信されることはありません。
-- 本アプリは完全にオフラインで動作し、明示的な WiFi対戦を除いてテレメトリや外部通信は一切行いません。
+- **LoRa 2人用モード（任意）** には **Cap LoRa-1262**（SX1262）とアンテナが必要です。下記「LoRa 対戦」を参照してください。
+- 本アプリは完全にオフラインで動作し、テレメトリや外部通信は一切行いません（LoRa UDP シミュレータはデスクトップ／`BATTLESHIP_LORA_SIM=1` のときのみ）。
 - 戦況解説は固定の定型文システムです（ローカル LLM は使用・必要としません）。詳細は下記「[アーキテクチャ](#アーキテクチャ)」を参照してください。
+
+### LoRa 対戦
+
+Bluetooth の届かない距離で対戦できます。**Cap LoRa-1262** が必要です。
+
+- Cap の着脱は**必ず本体の電源を切った状態**で行ってください（ホットスワップ不可）。
+- **対戦前に必ずアンテナを接続**してください。アンテナ無しでの送信は禁止です。
+- 無線設定（日本 920MHz 帯のルールに準拠）: 921.8 MHz、帯域幅 125 kHz、SF7、送信出力 13 dBm（20 mW）以下、送信前にリスニング（キャリアセンス 5 ms 以上、-90 dBm）。
+- ホスト中は 2 秒ごとにビーコンを送信し、平文で "BATTLESHIP for CardputerZero - Store code BSHP" を含みます。
+- 920MHz 帯 LoRa の使用が認められている地域でのみ使用してください。Cap が無い場合はエラー画面を表示します。
 
 ## 開発者向け情報
 
@@ -90,8 +100,8 @@ Intel Mac の場合は `darwin-x86-64` の preset を使用してください。
 ```
 view/        LVGL v9 の画面・ウィジェット・艦種パターン描画・キー入力処理
 i18n/        文字列カタログ（EN/JA/ZH）+ CJKフォント読み込み。LVGL・ゲームロジックに非依存
-net/         トランスポート非依存プロトコル（フレーミング、ACK/再送）。TcpTransport（WiFi）と
-             BleTransport（BlueZ/D-Bus）を共通の ITransport インターフェースの背後に実装
+net/         トランスポート非依存プロトコル（フレーミング、ACK/再送）。BleTransport（BlueZ/D-Bus）と
+             LoRaTransport（Cap LoRa-1262 / SX1262）を共通の ITransport インターフェースの背後に実装
 core/        純粋な C++ ゲームロジック — 盤面・艦の配置検証・射撃判定・確率密度AI。
              I/O・LVGL・スレッドに非依存
 commentary/  定型文による戦況解説（TemplateCommentator）。LLM 版の解説実装もツリー内に

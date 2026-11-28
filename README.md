@@ -3,7 +3,7 @@
 A classic naval-combat game built for the [M5Stack CardputerZero](https://cardputerzero.github.io/) (320×170, LVGL v9.5 + C++/CMake).
 
 - **1-player**: fight a local, on-device probability-density AI (no cloud, no LLM) across three difficulty levels, with live template battle commentary you can toggle off in Settings.
-- **2-player**: play another CardputerZero over **BLE** (default, no access point needed), **WiFi** (LAN), or pass-and-play **hotseat** on a single unit.
+- **2-player**: play another CardputerZero over **BLE** (default, no access point needed) or, optionally, **LoRa** (with a Cap LoRa-1262), or pass-and-play **hotseat** on a single unit.
 - **Languages**: English, 日本語 (Japanese), 简体中文 (Simplified Chinese) — switchable anytime from Settings, no restart required.
 
 日本語版の README は [README.ja.md](README.ja.md) を参照してください。
@@ -43,9 +43,9 @@ Classic Battleship rules: each player secretly places a fleet of 5 ships (Carrie
 **Manual install** (if you have a `.deb` built or downloaded separately):
 
 ```shell
-sudo dpkg -i battleship_1.0.0_arm64.deb
+sudo dpkg -i battleship_1.1.0-1_arm64.deb
 # or, to also pull in any missing dependencies:
-sudo apt install --no-install-recommends ./battleship_1.0.0_arm64.deb
+sudo apt install --no-install-recommends ./battleship_1.1.0-1_arm64.deb
 ```
 
 The app appears in APPLaunch after installation.
@@ -53,9 +53,19 @@ The app appears in APPLaunch after installation.
 ### Notes for playing on real hardware
 
 - **BLE (default 2-player mode)** requires the device's Bluetooth stack (BlueZ) to be running and the app's user account to be in the `bluetooth` group (`sudo usermod -aG bluetooth <user>`, then re-login). Without this, BLE features report "Bluetooth unavailable" instead of crashing. If a device doesn't show up when scanning, also check `rfkill unblock bluetooth`. BLE play works best with Wi-Fi turned off (the Bluetooth and Wi-Fi radios share one antenna), so the app warns on the host/join screens when Wi-Fi is connected; it also retries the connection automatically.
-- **WiFi 2-player mode** uses LAN-only discovery (UDP broadcast on port 35353, TCP game traffic on port 35354) — both devices must be on the same access point/subnet. No data ever leaves the LAN.
-- The game runs entirely offline; no telemetry or external network calls are made outside of an explicit WiFi match.
+- **LoRa 2-player mode (optional)** requires a **Cap LoRa-1262** (SX1262) and an antenna. See [LoRa play](#lora-play) below.
+- The game runs entirely offline; no telemetry or network calls are made. The only sockets in the tree are a LoRa UDP simulator used on desktop (or with `BATTLESHIP_LORA_SIM=1`), never in normal device use.
 - Battle commentary is a fixed template-phrase system (no local LLM is used or required) — see [Architecture](#architecture) below.
+
+### LoRa play
+
+LoRa lets two CardputerZero units play beyond Bluetooth range. It needs a **Cap LoRa-1262**.
+
+- Attach or detach the Cap **only while the unit is powered off** (no hot-swap).
+- **Attach the antenna before playing.** Never transmit without it.
+- Radio settings (Japan 920 MHz band rules): 921.8 MHz, 125 kHz bandwidth, SF7, transmit power at most 13 dBm (20 mW), and listen-before-talk (carrier sense of at least 5 ms at -90 dBm) before every transmission.
+- While hosting, the app transmits a beacon every 2 s containing the plain text "BATTLESHIP for CardputerZero - Store code BSHP".
+- Use LoRa play only where 920 MHz LoRa operation is permitted. Without the Cap attached, the app shows an error screen instead of crashing.
 
 ## Development
 
@@ -90,8 +100,8 @@ The codebase separates game logic, networking, AI, and UI so the whole game can 
 ```
 view/        LVGL v9 screens, widgets, ship-pattern rendering, key input handling
 i18n/        String catalog (EN/JA/ZH) + CJK font loading, no LVGL/game-logic dependency
-net/         Transport-agnostic protocol (framing, ACK/retry) with TcpTransport (WiFi)
-             and BleTransport (BlueZ/D-Bus) implementations behind one ITransport interface
+net/         Transport-agnostic protocol (framing, ACK/retry) with BleTransport (BlueZ/D-Bus)
+             and LoRaTransport (Cap LoRa-1262, SX1262) implementations behind one ITransport interface
 core/        Pure C++ game logic — board, ship placement/validation, shot resolution,
              the probability-density AI opponent. No I/O, no LVGL, no threads.
 commentary/  Template-based battle commentary (TemplateCommentator); an LLM-backed
