@@ -42,6 +42,9 @@ constexpr const char* kGattManagerIface = "org.bluez.GattManager1";
 constexpr const char* kAdvManagerIface = "org.bluez.LEAdvertisingManager1";
 constexpr const char* kAdvIface = "org.bluez.LEAdvertisement1";
 constexpr const char* kPropsIface = "org.freedesktop.DBus.Properties";
+constexpr const char* kAgentManagerIface = "org.bluez.AgentManager1";
+constexpr const char* kAgentIface = "org.bluez.Agent1";
+constexpr const char* kAgentPath = "/com/battleship/agent";
 
 // Our exported object hierarchy (host/peripheral role).
 constexpr const char* kAppRoot = "/com/battleship/gatt";
@@ -366,6 +369,7 @@ struct BleTransport::Impl {
     bool notify_enabled = false;         ///< central subscribed to TX
     bool app_registered = false;
     bool adv_registered = false;
+    bool agent_registered = false;       ///< RegisterAgent sent (both roles)
 
     // ---- join (central) ----
     std::string device_path;
@@ -411,6 +415,10 @@ struct BleTransport::Impl {
                                              nullptr, "o", kAppRoot);
                 }
             }
+            if (agent_registered) {
+                sd_bus_call_method_async(bus, nullptr, kBluez, "/org/bluez", kAgentManagerIface,
+                                         "UnregisterAgent", nullptr, nullptr, "o", kAgentPath);
+            }
             sd_bus_flush(bus);
             sd_bus_unref(bus);  // floating slots (vtables/matches/async) die with the bus
             bus = nullptr;
@@ -420,6 +428,7 @@ struct BleTransport::Impl {
         notify_enabled = false;
         app_registered = false;
         adv_registered = false;
+        agent_registered = false;
         services_resolved = false;
         resolve_query_in_flight = false;
         char_query_in_flight = false;
@@ -780,6 +789,53 @@ struct BleTransport::Impl {
         return 0;
     }
 
+    // ---------------- pairing agent (both roles) ----------------
+    //
+    // WHY: the CardputerZero image runs PipeWire's BLE-MIDI GATT server
+    // (service 03b80e5a-..., its characteristic requires encryption) on
+    // every unit. As soon as a peer's bluetoothd finishes GATT discovery
+    // its MIDI profile reads that characteristic -> "Insufficient
+    // Encryption" -> the kernel starts SMP pairing (both sides advertise
+    // IO capability KeyboardDisplay, SC + MITM -> numeric comparison).
+    // With no agent registered bluetoothd answers "User Confirmation
+    // Negative Reply" -> Pairing Failed (0x0c) -> the kernel drops the link
+    // (Authentication Failure) ~3 s after connect, before our NUS
+    // StartNotify. We therefore export an Agent1 that auto-accepts the
+    // confirmation. "KeyboardDisplay" is deliberate: it is the capability
+    // that produced a working bond on hardware (both sides call
+    // RequestConfirmation). Bonds are kept, so a repeat match between the
+    // same units skips pairing. Registration failure is ignored (other
+    // systems may not need pairing); classic profiles are never authorized.
+
+    static int agent_ok_cb(sd_bus_message* m, void*, sd_bus_error*) {
+        return sd_bus_reply_method_return(m, "");
+    }
+
+    static int agent_reject_cb(sd_bus_message* m, void*, sd_bus_error*) {
+        return sd_bus_reply_method_errorf(m, "org.bluez.Error.Rejected", "Rejected");
+    }
+
+    static const sd_bus_vtable kAgentVtable[];
+
+    /// Exports Agent1 and asks BlueZ to use it. Never fails the transport.
+    void register_agent() {
+        if (!bus) return;
+        if (sd_bus_add_object_vtable(bus, nullptr, kAgentPath, kAgentIface, kAgentVtable, this) <
+            0) {
+            return;
+        }
+        // Replies are ignored; bluetoothd serves calls in order, so the
+        // default-agent request follows the registration.
+        if (sd_bus_call_method_async(bus, nullptr, kBluez, "/org/bluez", kAgentManagerIface,
+                                     "RegisterAgent", nullptr, nullptr, "os", kAgentPath,
+                                     "KeyboardDisplay") < 0) {
+            return;
+        }
+        agent_registered = true;
+        sd_bus_call_method_async(bus, nullptr, kBluez, "/org/bluez", kAgentManagerIface,
+                                 "RequestDefaultAgent", nullptr, nullptr, "o", kAgentPath);
+    }
+
     // sd-bus vtables for the objects we export in the host role. Static
     // members (not namespace-scope globals) because their entries name the
     // private handler functions above; out-of-class member definitions
@@ -821,6 +877,21 @@ const sd_bus_vtable BleTransport::Impl::kTxCharVtable[] = {
     SD_BUS_VTABLE_END,
 };
 
+// Agent1 on kAgentPath.
+const sd_bus_vtable BleTransport::Impl::kAgentVtable[] = {
+    SD_BUS_VTABLE_START(0),
+    SD_BUS_METHOD("Release", "", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPinCode", "o", "s", agent_reject_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPinCode", "os", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestPasskey", "o", "u", agent_reject_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("DisplayPasskey", "ouq", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestConfirmation", "ou", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("RequestAuthorization", "o", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("AuthorizeService", "os", "", agent_reject_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("Cancel", "", "", agent_ok_cb, SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_VTABLE_END,
+};
+
 // LEAdvertisement1 on kAdvPath.
 const sd_bus_vtable BleTransport::Impl::kAdvVtable[] = {
     SD_BUS_VTABLE_START(0),
@@ -859,6 +930,7 @@ bool BleTransport::start_host(const std::string& host_name) {
     }
 
     impl_->role = Impl::Role::Host;
+    impl_->register_agent();
     impl_->local_name = std::string(kBleNamePrefix) + host_name;
 
     // Export the NUS application (ObjectManager root + service + 2 chars)
@@ -922,6 +994,7 @@ bool BleTransport::start_join(const std::string& device_path) {
     }
 
     impl_->role = Impl::Role::Join;
+    impl_->register_agent();
     impl_->device_path = device_path;
     impl_->start_ms = monotonic_ms();
 

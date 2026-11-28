@@ -1299,6 +1299,33 @@ NetSession は**無変更**（ITransport の差し替えのみ、PLAN.md §2.2 �
    rfkill/§13.5）。`org.bluez.Error.NotPermitted` 系は D-Bus ポリシー。
    両機の自動対戦は WiFi 同様 `BATTLESHIP_NET_AUTOPILOT=win|lose` が使える
 
+### 13.6.1 BLE 実機検証結果（2026-11-28）
+
+実機2台（btmon で観測）での BLE 対戦検証で見つかった問題と対処。
+（章番号は既存の §13.7 既知の制約・§13.8 の参照を壊さないため 13.6.1 とした。）
+
+- **BR/EDR ベアラ問題**: ホストのアドバタイズに Flags 0x02 が付くと、ジョイナ側
+  BlueZ が BR/EDR を選んで接続 → 古典 SSP が agent 無しで Authentication Failure。
+  対処: アドバタイズの `Discoverable=false` 固定（efc5c66）。ジョイナは LE
+  Transport フィルタでスキャンする。
+- **MIDI 起因の SMP ペアリング**: 両機に PipeWire の BLE-MIDI GATT サーバ
+  （service 03b80e5a-ede8-4b33-a751-6ce34ec4c700、特性は暗号化必須）があり、相手の
+  bluetoothd の MIDI クライアントが GATT 探索直後にそれを読む → Insufficient
+  Encryption → カーネルが SMP ペアリング（両側 KeyboardDisplay、SC+MITM で
+  numeric comparison）→ agent が無く "User Confirmation Negative Reply" →
+  Pairing Failed (0x0c) → 接続後約3秒でリンク断（NUS の StartNotify 前）。
+  対処: `BleTransport` が両ロールで `org.bluez.Agent1`（/com/battleship/agent）を
+  `RegisterAgent("KeyboardDisplay")` + `RequestDefaultAgent` で登録し、
+  RequestConfirmation / RequestAuthorization を自動承認（AuthorizeService・
+  PIN/Passkey 要求は Rejected）。登録失敗は無視。ボンドは保持され、同じ2台の
+  2回目以降はペアリング不要。アプリは pi ユーザ（bluetooth グループ外）だが、
+  D-Bus ポリシー上 default context から org.bluez 宛の送信は可能で登録できる。
+  手動で bluetoothctl の agent により両機をボンドした後は双方向で対戦成功。
+- **WiFi 2.4 GHz 共存（既知リスク）**: ペアリング問題の解決前の試行の一部で、WiFi
+  有効時に supervision timeout（既定 420 ms）によるリンク断が発生した。ペアリング
+  解決後は WiFi 有効のまま短時間のテストで対戦成功。長時間・混雑環境での安定性は
+  未確認の既知リスクとして残す。
+
 ### 13.7 既知の制約
 
 - **Mac では BLE の実通信検証もコンパイルも不可**（BATTLESHIP_BLE=0）。
