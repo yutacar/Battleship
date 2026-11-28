@@ -45,3 +45,11 @@ TEST(BleHandshakePolicy, RetryDelayElapsed) {
     EXPECT_TRUE(ble_retry_delay_elapsed(5000, 5000 + kBleRetryDelayMs));
     EXPECT_FALSE(ble_retry_delay_elapsed(5000, 4000));  // clock never goes backwards
 }
+
+TEST(BleHandshakePolicy, RetryReadyGatesOnTeardownReply) {
+    EXPECT_FALSE(ble_retry_ready(5500, 5000, false));                       // delay not elapsed
+    EXPECT_TRUE(ble_retry_ready(6000, 5000, false));                        // nothing outstanding
+    EXPECT_FALSE(ble_retry_ready(6000, 5000, true));                        // Disconnect reply pending
+    EXPECT_FALSE(ble_retry_ready(5000 + kBleTeardownWaitMs - 1, 5000, true));
+    EXPECT_TRUE(ble_retry_ready(5000 + kBleTeardownWaitMs, 5000, true));    // bound reached
+}

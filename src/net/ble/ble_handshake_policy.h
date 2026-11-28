@@ -43,6 +43,21 @@ inline bool ble_handshake_timed_out(uint64_t start_ms, uint64_t now_ms,
     return now_ms >= start_ms && now_ms - start_ms >= timeout_ms;
 }
 
+/// Longest a retry waits for the previous attempt's teardown Disconnect (or a
+/// still-pending Connect) reply before going ahead anyway.
+inline constexpr uint32_t kBleTeardownWaitMs = 5000;
+
+/// True when the next Connect may be issued: the retry pause has elapsed AND
+/// either no teardown reply is outstanding or the wait bound has passed
+/// (reissuing while the old link is still being torn down would let BlueZ's
+/// delayed ACL drop kill the new attempt).
+inline bool ble_retry_ready(uint64_t now_ms, uint64_t failed_ms, bool waiting_for_reply,
+                            uint32_t delay_ms = kBleRetryDelayMs,
+                            uint32_t wait_bound_ms = kBleTeardownWaitMs) {
+    if (!ble_retry_delay_elapsed(failed_ms, now_ms, delay_ms)) return false;
+    return !waiting_for_reply || ble_retry_delay_elapsed(failed_ms, now_ms, wait_bound_ms);
+}
+
 /// Interprets a Device1 PropertiesChanged: the link is lost when Connected
 /// went false, or ServicesResolved went false after it had been true.
 /// `has_*` says whether the signal carried that property at all.

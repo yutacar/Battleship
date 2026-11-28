@@ -387,6 +387,31 @@ struct BleTransport::Impl {
     uint64_t retry_failed_ms = 0;        ///< when the failed attempt was noticed
     bool connect_in_flight = false;      ///< Connect call issued, reply not yet seen
     sd_bus_slot* tx_match_slot = nullptr;  ///< match on peer TX char (owned; dropped per attempt)
+    // Owned slots of the pipeline's async calls: dropping a slot cancels its
+    // reply callback, so a late reply of attempt N never reaches attempt N+1.
+    sd_bus_slot* connect_slot = nullptr;
+    sd_bus_slot* resolve_slot = nullptr;
+    sd_bus_slot* char_slot = nullptr;
+    sd_bus_slot* notify_slot = nullptr;
+    sd_bus_slot* disconnect_slot = nullptr;
+    bool retry_cleaned = false;          ///< failed attempt's state reset + teardown done (in poll)
+    bool retry_teardown = false;         ///< link may still be up: Disconnect before retrying
+    bool disconnect_waiting = false;     ///< teardown Disconnect reply outstanding
+
+    static void drop_slot(sd_bus_slot*& slot) {
+        if (slot) {
+            sd_bus_slot_unref(slot);
+            slot = nullptr;
+        }
+    }
+    void drop_all_slots() {
+        drop_slot(tx_match_slot);
+        drop_slot(connect_slot);
+        drop_slot(resolve_slot);
+        drop_slot(char_slot);
+        drop_slot(notify_slot);
+        drop_slot(disconnect_slot);
+    }
 
     /// Joiner: drops all per-attempt pipeline state (not the device match).
     void reset_attempt_state() {
@@ -397,20 +422,29 @@ struct BleTransport::Impl {
         link_confirmed = false;
         rx_char_path.clear();
         tx_char_path.clear();
-        if (tx_match_slot) {
-            sd_bus_slot_unref(tx_match_slot);
-            tx_match_slot = nullptr;
-        }
+        // (connect_slot / disconnect_slot are handled by the retry gate.)
+        drop_slot(tx_match_slot);
+        drop_slot(resolve_slot);
+        drop_slot(char_slot);
+        drop_slot(notify_slot);
+    }
+
+    static int disconnect_reply_cb(sd_bus_message*, void* userdata, sd_bus_error*) {
+        static_cast<Impl*>(userdata)->disconnect_waiting = false;
+        return 0;
     }
 
     /// Joiner: issues Device1.Connect for a new attempt. False on send error.
     bool issue_connect() {
         reset_attempt_state();
+        drop_slot(connect_slot);     // a straggling old Connect reply must not land here
+        drop_slot(disconnect_slot);
+        disconnect_waiting = false;
         ++attempt;
         start_ms = monotonic_ms();
-        connect_in_flight = sd_bus_call_method_async(bus, nullptr, kBluez, device_path.c_str(),
-                                                     kDeviceIface, "Connect", &connect_reply_cb,
-                                                     this, "") >= 0;
+        connect_in_flight = sd_bus_call_method_async(bus, &connect_slot, kBluez,
+                                                     device_path.c_str(), kDeviceIface, "Connect",
+                                                     &connect_reply_cb, this, "") >= 0;
         return connect_in_flight;
     }
 
@@ -429,13 +463,26 @@ struct BleTransport::Impl {
             fail();
             return;
         }
-        if (teardown_link) {
-            sd_bus_call_method_async(bus, nullptr, kBluez, device_path.c_str(), kDeviceIface,
-                                     "Disconnect", nullptr, nullptr, "");
-        }
-        reset_attempt_state();
+        // Slot cleanup + the teardown Disconnect happen from poll() (never
+        // inside a reply callback); until then callbacks ignore their results.
         retry_pending = true;
+        retry_cleaned = false;
+        retry_teardown = teardown_link;
         retry_failed_ms = monotonic_ms();
+    }
+
+    /// poll(): first step of a scheduled retry.
+    void retry_cleanup() {
+        retry_cleaned = true;
+        reset_attempt_state();
+        disconnect_waiting = false;
+        if (retry_teardown) {
+            drop_slot(disconnect_slot);
+            disconnect_waiting =
+                sd_bus_call_method_async(bus, &disconnect_slot, kBluez, device_path.c_str(),
+                                         kDeviceIface, "Disconnect", &disconnect_reply_cb, this,
+                                         "") >= 0;
+        }
     }
 
     std::vector<uint8_t> recv_buffer;
@@ -475,10 +522,7 @@ struct BleTransport::Impl {
                                          "UnregisterAgent", nullptr, nullptr, "o", kAgentPath);
             }
             sd_bus_flush(bus);
-            if (tx_match_slot) {
-                sd_bus_slot_unref(tx_match_slot);
-                tx_match_slot = nullptr;
-            }
+            drop_all_slots();
             sd_bus_unref(bus);  // floating slots (vtables/matches/async) die with the bus
             bus = nullptr;
         }
@@ -498,6 +542,9 @@ struct BleTransport::Impl {
         retry_pending = false;
         retry_failed_ms = 0;
         connect_in_flight = false;
+        retry_cleaned = false;
+        retry_teardown = false;
+        disconnect_waiting = false;
         device_path.clear();
         rx_char_path.clear();
         tx_char_path.clear();
@@ -724,7 +771,7 @@ struct BleTransport::Impl {
             return 0;
         }
         if (sd_bus_message_is_method_error(reply, nullptr)) {
-            self->attempt_failed(false);
+            self->attempt_failed(self->link_confirmed);  // link may still be up
             return 0;
         }
         if (self->retry_pending) {
@@ -738,6 +785,9 @@ struct BleTransport::Impl {
     static int resolved_reply_cb(sd_bus_message* reply, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
         self->resolve_query_in_flight = false;
+        if (self->retry_pending || self->state != TransportState::Connecting) {
+            return 0;
+        }
         if (sd_bus_message_is_method_error(reply, nullptr)) {
             return 0;  // device object may not be ready yet; retried
         }
@@ -757,6 +807,9 @@ struct BleTransport::Impl {
     static int char_lookup_reply_cb(sd_bus_message* reply, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
         self->char_query_in_flight = false;
+        if (self->retry_pending || self->state != TransportState::Connecting) {
+            return 0;
+        }
         if (sd_bus_message_is_method_error(reply, nullptr)) {
             return 0;
         }
@@ -839,6 +892,9 @@ struct BleTransport::Impl {
 
     static int start_notify_reply_cb(sd_bus_message* reply, void* userdata, sd_bus_error*) {
         auto* self = static_cast<Impl*>(userdata);
+        if (self->retry_pending) {
+            return 0;
+        }
         if (sd_bus_message_is_method_error(reply, nullptr)) {
             self->attempt_failed(true);  // retries while still Connecting
             return 0;
@@ -1119,8 +1175,11 @@ void BleTransport::poll() {
         if (impl.retry_pending) {
             // Waiting out the retry pause; reissue Connect once any stale
             // reply of the previous attempt has been seen.
-            if (ble_retry_delay_elapsed(impl.retry_failed_ms, monotonic_ms()) &&
-                !impl.connect_in_flight) {
+            if (!impl.retry_cleaned) {
+                impl.retry_cleanup();
+            }
+            if (ble_retry_ready(monotonic_ms(), impl.retry_failed_ms,
+                                impl.connect_in_flight || impl.disconnect_waiting)) {
                 impl.retry_pending = false;
                 if (!impl.issue_connect()) {
                     impl.fail();
@@ -1145,16 +1204,18 @@ void BleTransport::poll() {
         // enough between retries of a not-yet-answered stage.
         if (!impl.services_resolved) {
             if (!impl.resolve_query_in_flight) {
+                Impl::drop_slot(impl.resolve_slot);  // finished previous poll
                 impl.resolve_query_in_flight =
-                    sd_bus_call_method_async(impl.bus, nullptr, kBluez, impl.device_path.c_str(),
+                    sd_bus_call_method_async(impl.bus, &impl.resolve_slot, kBluez, impl.device_path.c_str(),
                                              kPropsIface, "Get", &Impl::resolved_reply_cb,
                                              impl_.get(), "ss", kDeviceIface,
                                              "ServicesResolved") >= 0;
             }
         } else if (impl.rx_char_path.empty() || impl.tx_char_path.empty()) {
             if (!impl.char_query_in_flight) {
+                Impl::drop_slot(impl.char_slot);
                 impl.char_query_in_flight =
-                    sd_bus_call_method_async(impl.bus, nullptr, kBluez, "/",
+                    sd_bus_call_method_async(impl.bus, &impl.char_slot, kBluez, "/",
                                              "org.freedesktop.DBus.ObjectManager",
                                              "GetManagedObjects", &Impl::char_lookup_reply_cb,
                                              impl_.get(), "") >= 0;
@@ -1166,8 +1227,8 @@ void BleTransport::poll() {
             // no early notification can slip past the match.
             sd_bus_match_signal(impl.bus, &impl.tx_match_slot, kBluez, impl.tx_char_path.c_str(), kPropsIface,
                                 "PropertiesChanged", &Impl::tx_props_changed_cb, impl_.get());
-            sd_bus_call_method_async(impl.bus, nullptr, kBluez, impl.tx_char_path.c_str(),
-                                     kGattCharIface, "StartNotify",
+            sd_bus_call_method_async(impl.bus, &impl.notify_slot, kBluez,
+                                     impl.tx_char_path.c_str(), kGattCharIface, "StartNotify",
                                      &Impl::start_notify_reply_cb, impl_.get(), "");
         }
     }
