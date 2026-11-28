@@ -52,7 +52,7 @@ sudo apt install --no-install-recommends ./battleship_1.1.0-1_arm64.deb
 
 ### 実機でプレイする際の注意
 
-- **BLE（デフォルトの2人用モード）** を使うには、端末の Bluetooth スタック（BlueZ）が起動していること、およびアプリを実行するユーザーが `bluetooth` グループに属していることが必要です（`sudo usermod -aG bluetooth <user>` 実行後に再ログイン）。設定が無い場合、アプリはクラッシュせず「Bluetooth unavailable」と表示されます。スキャンしても相手が見つからない場合は `rfkill unblock bluetooth` も確認してください。BLE 対戦は Wi-Fi をオフにすると最も安定します（Bluetooth と Wi-Fi は1本のアンテナを共用）。Wi-Fi 接続中はホスト／参加画面で警告を表示し、接続は自動的にリトライされます。
+- **BLE（デフォルトの2人用モード）** を使うには、端末の Bluetooth スタック（BlueZ）が起動していること、およびアプリを実行するユーザーが `bluetooth` グループに属していることが必要です（`sudo usermod -aG bluetooth <user>` 実行後に再ログイン）。設定が無い場合、アプリはクラッシュせず「Bluetooth unavailable」と表示されます。スキャンしても相手が見つからない場合は `rfkill unblock bluetooth` も確認してください。BLE 対戦は Wi-Fi をオフにすると最も安定します（Bluetooth と Wi-Fi は1本のアンテナを共用）。Wi-Fi 接続中はホスト／参加画面で警告を表示し、接続は自動的にリトライされます。BLE 対戦の画面を開いている間、アプリは Bluetooth のペアリング要求を自動的に受け入れ（ホスト時は近くの任意の端末から、参加時は選んだホストからのみ）、ペアリングは再接続を速くするため保持されます。
 - **LoRa 2人用モード（任意）** には **Cap LoRa-1262**（SX1262）とアンテナが必要です。下記「LoRa 対戦」を参照してください。
 - 本アプリは完全にオフラインで動作し、テレメトリや外部通信は一切行いません（LoRa UDP シミュレータはデスクトップ／`BATTLESHIP_LORA_SIM=1` のときのみ）。
 - 戦況解説は固定の定型文システムです（ローカル LLM は使用・必要としません）。詳細は下記「[アーキテクチャ](#アーキテクチャ)」を参照してください。

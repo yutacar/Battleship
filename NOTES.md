@@ -2334,8 +2334,8 @@ battleship・chainled を含む全 40 アプリを削除**した。このため 
 | 空中線電力 | 20 mW（13 dBm） | SetTxParams 13 dBm、PA 設定 0x04/0x07/0x00/0x01、OCP 0x38（出力 ≈ TxParams 値）。測定器なし = チップ設定のみで未実測 |
 | TCXO | - | DIO3 3.0 V、起動 5 ms（LoRa Messenger docs/phase6-cap-lora-1262.md の設定と一致） |
 | キャリアセンス | ≥ 5 ms、閾値 -80 dBm | ≥ 5 ms、-90 dBm（`sx1262_lbt_config_valid` で強制）+ 再アーム後 1 ms の RSSI 整定待ち（実測由来） |
-| 送信時間 | 1 回 4 秒未満 | airtime > 400 ms はポリシーが拒否（最大 80 B で約 0.14 s） |
-| 送信休止 | 送信終了後 50 ms 以上 | Japan920Policy で強制 |
+| 送信時間 | 1 回 4 秒未満 | airtime > 400 ms はポリシーが拒否（最大 80 B で約 0.14 s）。SX1262 の SetTx タイムアウト（フェイルセーフ）は 3 秒 |
+| 送信休止 | 送信終了後 50 ms 以上 | Japan920Policy で強制。基準は送信開始後に読んだ時刻（キャリアセンス後）+ airtime、さらに安全マージン 5 ms（実効 55 ms、`kEmissionPauseSafetyMarginMs`） |
 | 時間当たり上限 | 920.6〜922.2 MHz で CS ≥ 5 ms なら無し | 設けていない |
 
 ### 21.8 権限
@@ -2360,6 +2360,9 @@ battleship・chainled を含む全 40 アプリを削除**した。このため 
 - **BLE 修正**（efc5c66..1abb210）: LE 専用接続、BlueZ Agent1 による自動ペアリング、Join 側の
   自動リトライ、Wi-Fi 接続中の警告表示。既知の制限: Wi-Fi 接続中は BLE 対戦不可（アンテナ共用）。
   2 台のペアリングは初回の BLE 対戦時に自動で行われ保持される
+- **1.0.0-3 の修正を同梱**（未公開だった 1.0.0-3、1637746）: CardputerZero 内蔵キーボード
+  （tca8418）の Sym レイヤーをデコード。Sym+R の `-`、Sym+T の `+`、Sym+S の `:`、Sym+B の `.` などが
+  落ちる／誤変換される問題を修正（M5 の symbol table を内蔵キーボードにのみ適用、USB キーボードは標準のまま）
 - **ストア権限の変更**: `network` true→false、`additional_hardware` false→true。
   説明文は WiFi の記述を除去し、LoRa（任意、Cap LoRa-1262 装着時）を追記（3 言語）
 

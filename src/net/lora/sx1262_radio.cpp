@@ -94,7 +94,10 @@ constexpr std::uint8_t kFallbackStandbyXosc = 0x30U;
 constexpr std::uint8_t kRegulatorDcdc = 0x01U;
 constexpr std::uint8_t kTcxo3Volts = 0x06U;
 constexpr std::uint32_t kTcxoDelayUnits = 320U;     // 5 ms / 15.625 us
-constexpr std::uint32_t kTxTimeoutUnits = 320'000U; // 5 seconds
+// SetTx timeout: a hardware failsafe only (our longest packet is ~150 ms on
+// air). 3 s keeps even a runaway emission under the ARIB 4 s per-emission
+// limit. 3000 ms / 15.625 us = 192000 units.
+constexpr std::uint32_t kTxTimeoutUnits = 192'000U; // 3 seconds
 constexpr std::uint32_t kBusyTimeoutMs = 100U;
 constexpr std::uint8_t kMaxTxPowerDbm = 13U;
 constexpr auto kCarrierSenseInterval = std::chrono::microseconds(200);

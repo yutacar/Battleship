@@ -30,11 +30,16 @@
  * ordinary byte stream, and the frame decoder's
  * resynchronization tolerates any chunking anyway.
  *
- * Security scope (deliberate, PLAN.md Phase 6): Just Works connections only.
- * No pairing/bonding is requested and link encryption is out of scope for a
- * casual game -- the protocol carries only coordinates/outcomes (never board
- * contents, see messages.h), so a sniffed link reveals nothing the opposing
- * player doesn't already see on their own screen.
+ * Security scope (deliberate, PLAN.md Phase 6): the app itself never asks for
+ * pairing and link encryption is out of scope for a casual game -- the
+ * protocol carries only coordinates/outcomes (never board contents, see
+ * messages.h), so a sniffed link reveals nothing the opposing player doesn't
+ * already see on their own screen. BlueZ may still start pairing (SMP) on its
+ * own (the device image's BLE-MIDI GATT service forces it), so while a BLE game is
+ * open the transport registers an in-app org.bluez.Agent1 that auto-accepts
+ * pairing confirmations: the host accepts any device, the joiner only its
+ * target host; classic AuthorizeService requests are rejected. The resulting
+ * bond is kept by BlueZ (faster reconnects).
  *
  * Platform scope: Linux/BlueZ only. This header is safe to include (and this
  * class safe to name) on any platform -- the implementation is pimpl'd -- but

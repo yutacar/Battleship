@@ -75,7 +75,11 @@ bool CapPower::acquire() {
     // Power already on. A marker means it is left over from our own earlier
     // run, so it is ours to switch off. Without a marker it belongs to someone
     // else and is not touched.
-    owned_ = fs::exists(marker_path_);
+    // Non-throwing overload: a stat error (e.g. EACCES) must not throw out of
+    // open_radio() on the UI thread. On error the power is treated as not
+    // ours and left alone.
+    std::error_code ec;
+    owned_ = fs::exists(marker_path_, ec) && !ec;
     return true;
 }
 
